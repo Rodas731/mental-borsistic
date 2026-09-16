@@ -1,0 +1,1123 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime
+from data.market_data import MarketDataClient
+from agents.price_agent import PriceAgent
+from agents.news_agent import NewsAgent
+from agents.sec_agent import SECAgent
+from agents.smart_money_agent import SmartMoneyAgent
+from agents.risk_agent import RiskAgent
+from agents.macro_agent import MacroAgent
+from core.fusion_engine import SignalFusionEngine
+from data.db import (
+    get_latest_signals, get_portfolio, get_trade_history, execute_trade, save_signal,
+    get_agent_account, set_agent_budget, get_agent_portfolio, get_agent_trades,
+    get_paper_deposits, add_paper_deposit, delete_paper_deposit, get_paper_account_summary,
+    verify_user_credentials
+)
+from agents.autotrading_agent import AutotradingAgent
+from data.ticker_names import TICKER_NAMES
+
+st.set_page_config(page_title="Market Intelligence Engine", layout="wide", page_icon="📈")
+
+# Estrai la funzione per i colori così è riutilizzabile
+def get_signal_color(sig):
+    if sig == 0:
+        return "#808080"
+    elif sig > 0:
+        r = int(255 * (1 - sig))
+        g = int(255 - 155 * sig)
+        return f"rgb({r}, {g}, 0)"
+    else:
+        abs_sig = abs(sig)
+        r = int(255 - 116 * abs_sig)
+        g = int(192 * (1 - abs_sig))
+        b = int(203 * (1 - abs_sig))
+        return f"rgb({r}, {g}, {b})"
+
+def render_single_analysis(ticker):
+    with st.spinner(f"Raccolta dati e analisi per {ticker}..."):
+        data_client = MarketDataClient()
+        df = data_client.get_historical_prices(ticker, period="6mo")
+        company_info = data_client.get_company_info(ticker)
+        
+        if df.empty:
+            st.error(f"Impossibile recuperare i dati per {ticker}. Controlla il simbolo.")
+            return None
+    
+        name = company_info.get("longName", TICKER_NAMES.get(ticker, ticker))
+        sector = company_info.get("sector", "N/A")
+        st.subheader(f"{name} ({ticker}) - Settore: {sector}")
+        
+        # Selezione tipo di grafico
+        chart_type = st.radio("Tipo di Grafico:", ["Candele", "Linea", "Area"], horizontal=True, key=f"chart_type_{ticker}")
+        
+        if chart_type == "Candele":
+            with st.expander("💡 Come leggere le Candele Giapponesi?"):
+                st.markdown("""
+                Ogni candela rappresenta cosa è successo al prezzo in un singolo giorno:
+                *   🟩 **Candela Verde (Prezzo salito):** La base del "corpo" è il prezzo di apertura, la cima è la chiusura.
+                *   🟥 **Candela Rossa (Prezzo sceso):** La cima del "corpo" è il prezzo di apertura, la base è la chiusura.
+                *   〰️ **Ombre (le lineette sopra e sotto):** Indicano il prezzo *Massimo* (in alto) e *Minimo* (in basso) toccato in quella giornata.
+                """)
+                
+        fig = go.Figure()
+        
+        if chart_type == "Candele":
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Prezzo'))
+        elif chart_type == "Linea":
+            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name='Prezzo', line=dict(color='#1f77b4', width=2)))
+        elif chart_type == "Area":
+            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', name='Prezzo', line=dict(color='#00d2ff', width=2)))
+            
+        # Calcolo date per lo zoom di default (ultimi 30 giorni)
+        last_date = df.index[-1]
+        start_zoom_date = df.index[-30] if len(df) > 30 else df.index[0]
+        
+        # Calcoliamo il min e max del prezzo nell'intervallo visibile per non schiacciare l'asse Y
+        df_zoom = df.loc[start_zoom_date:last_date]
+        min_y = df_zoom['Low'].min() if 'Low' in df_zoom.columns else df_zoom['Close'].min()
+        max_y = df_zoom['High'].max() if 'High' in df_zoom.columns else df_zoom['Close'].max()
+        margin_y = (max_y - min_y) * 0.05
+        
+        fig.update_layout(
+            height=450, 
+            margin=dict(l=0, r=0, t=30, b=0),
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=7, label="1 Settimana", step="day", stepmode="backward"),
+                        dict(count=1, label="1 Mese", step="month", stepmode="backward"),
+                        dict(count=3, label="3 Mesi", step="month", stepmode="backward"),
+                        dict(step="all", label="Tutto (6 Mesi)")
+                    ]),
+                    font=dict(color="white"),
+                    bgcolor="#1f2633",
+                    activecolor="#2980b9"
+                ),
+                rangeslider=dict(visible=False),
+                type="date",
+                range=[start_zoom_date, last_date]
+            ),
+            yaxis=dict(
+                autorange=False,
+                range=[min_y - margin_y, max_y + margin_y],
+                fixedrange=False,
+                rangemode="normal"
+            )
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        data_payload = {"market_data": df, "company_info": company_info}
+
+        price_agent = PriceAgent()
+        news_agent = NewsAgent()
+        sec_agent = SECAgent()
+        smart_money_agent = SmartMoneyAgent()
+        risk_agent = RiskAgent()
+        
+        price_res = price_agent.analyze(ticker, data_payload)
+        price_res['agent_name'] = price_agent.name
+        
+        news_res = news_agent.analyze(ticker, data_payload)
+        news_res['agent_name'] = news_agent.name
+        
+        sec_res = sec_agent.analyze(ticker, data_payload)
+        sec_res['agent_name'] = sec_agent.name
+        
+        smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+        smart_money_res['agent_name'] = smart_money_agent.name
+        
+        risk_res = risk_agent.analyze(ticker, data_payload)
+        risk_res['agent_name'] = risk_agent.name
+        
+        fusion_engine = SignalFusionEngine()
+        final_result = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res])
+        
+        st.markdown("---")
+        st.header("🔮 Verdetto Finale (Prediction Engine)")
+        
+        color = get_signal_color(final_result['final_signal'])
+        risk_level = final_result.get('risk_level', 'SCONOSCIUTO')
+        
+        risk_color = "gray"
+        if risk_level == "BASSO": risk_color = "green"
+        elif risk_level == "MEDIO": risk_color = "orange"
+        elif risk_level == "ALTO": risk_color = "orangered"
+        elif risk_level == "ALTISSIMO": risk_color = "red"
+        
+        st.markdown(f'''
+        <div style="padding: 20px; border-radius: 10px; background-color: rgba(128,128,128,0.1); text-align: center; margin-bottom: 20px;">
+            <h3 style="margin-bottom: 5px;">Previsione: {final_result['prediction']}</h3>
+            <h1 style="font-size: 3.5rem; margin: 0; color: {color};">Segnale: {final_result['final_signal']:.2f}</h1>
+            <p style="margin-top: 5px; font-size: 1.2rem;" title="L'affidabilità globale della previsione, calcolata combinando la certezza di tutti gli agenti direzionali.">Confidenza: {final_result['confidence']:.0%} ℹ️</p>
+            <hr style="margin: 10px 0; border-color: rgba(128,128,128,0.3);">
+            <h3 style="margin: 0; color: {risk_color};">Livello di Rischio: {risk_level}</h3>
+        </div>
+        ''', unsafe_allow_html=True)
+        
+        with st.expander("📊 Come viene calcolato il Segnale e cosa significa?"):
+            st.markdown("""
+            Il **Segnale** finale è un indicatore numerico che rappresenta il consenso globale (o *Verdetto Finale*) di tutti gli agenti dell'intelligenza artificiale sul titolo analizzato.
+            
+            **Come si interpreta il numero?**
+            *   🟢 **Da +0.20 in su (RIALZISTA):** Indica una tendenza positiva. Più il valore si avvicina a +1.00, più forte è il segnale di potenziale acquisto.
+            *   🔴 **Da -0.20 in giù (RIBASSISTA):** Indica una tendenza negativa. Più il valore si avvicina a -1.00, più forte è il segnale di potenziale vendita.
+            *   ⚪ **Tra -0.20 e +0.20 (NEUTRALE):** Indica che i segnali degli agenti si annullano a vicenda o che nessuno esprime una convinzione netta.
+
+            **Come viene calcolato matematicamente?**
+            Il sistema utilizza il `SignalFusionEngine` che calcola una **media ponderata** dei risultati dei 4 agenti (Analisi Tecnica, Sentiment News, Fondamentali SEC, Flussi Smart Money).
+            
+            Ogni agente restituisce un suo segnale (da -1 a +1) e una sua "confidenza" (livello di sicurezza dell'analisi).
+            1. **Calcolo del Peso:** Ad ogni agente è assegnato un "Peso Base" (es. Analisi Tecnica ha peso maggiore) che viene poi moltiplicato per la *Confidenza* espressa dall'agente in quel momento.
+            2. **Somma Ponderata:** Si moltiplica il segnale di ogni agente per il suo peso ricalcolato.
+            3. **Risultato Finale:** La somma di questi valori viene divisa per la somma totale dei pesi.
+            
+            In questo modo, se un agente produce un segnale fortissimo ma non è per niente sicuro (confidenza bassa), il suo impatto sul Verdetto Finale sarà minimo, privilegiando le analisi più solide e con dati più chiari.
+            """)
+
+        st.markdown("---")
+        st.header(f"🤖 Report degli Agenti ({ticker})")
+        
+        with st.expander(f"{price_agent.name} su {ticker} (Segnale: {price_res['signal']:.2f})", expanded=True):
+            st.info("📉 **Come agisce:** Analizza l'azione storica del prezzo e gli indicatori matematici (es. RSI, Medie Mobili).\n🎯 **Cosa indica:** Se il titolo è in una fase di ipercomprato/ipervenduto e la forza del trend a breve termine.")
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Segnale Tecnico", f"{price_res['signal']:.2f}")
+            mcol2.metric("Valore RSI", f"{price_res.get('metadata', {}).get('rsi', 0):.2f}", help="Relative Strength Index (Indice di Forza Relativa): misura l'ipercomprato o l'ipervenduto del titolo.")
+            mcol3.metric("Confidenza", f"{price_res['confidence']:.0%}", help="Livello di affidabilità tecnica: si basa sulla forza del trend, sui volumi e sulla chiarezza del grafico.")
+            st.write(f"**Ragionamento:** {price_res['reasoning']}")
+            
+        with st.expander(f"{news_agent.name} su {ticker} (Segnale: {news_res['signal']:.2f})", expanded=True):
+            st.info("📰 **Come agisce:** Legge le ultime notizie finanziarie e le interpreta usando l'Intelligenza Artificiale (NLP).\n🎯 **Cosa indica:** L'umore generale (Sentiment) e come investitori e media stanno reagendo alle novità dell'azienda.")
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Segnale Sentiment", f"{news_res['signal']:.2f}")
+            mcol2.metric("Notizie Analizzate", f"{news_res.get('metadata', {}).get('num_articles', 0)}")
+            mcol3.metric("Confidenza", f"{news_res['confidence']:.0%}", help="Livello di certezza del NLP: aumenta se ci sono tante notizie coerenti tutte verso la stessa direzione (positive o negative).")
+            st.write(f"**Ragionamento:** {news_res['reasoning']}")
+            
+            articles = news_res.get('metadata', {}).get('articles', [])
+            if articles:
+                with st.expander("📚 Clicca qui per vedere le notizie analizzate"):
+                    for art in articles[:10]:
+                        date = art.get('date', '')
+                        date_str = f"🕒 <b>{date}</b> - " if date else ""
+                        st.markdown(
+                            f"<p style='font-size: 0.85rem; margin-bottom: 5px;'>"
+                            f"{date_str}<a href='{art['link']}' target='_blank' style='text-decoration: none;'>{art['title']}</a> "
+                            f"<span style='color: gray; font-size: 0.75rem;'>(Sentiment: {art['sentiment']:.2f})</span>"
+                            f"</p>", 
+                            unsafe_allow_html=True
+                        )
+            else:
+                st.warning("Nessuna notizia recente trovata per questo ticker su Yahoo Finance. (Spesso accade per i titoli minori o non-USA come quelli della Borsa di Milano).")
+            
+        with st.expander(f"{sec_agent.name} su {ticker} (Segnale: {sec_res['signal']:.2f})", expanded=True):
+            st.info("🏛️ **Come agisce:** Estrae i dati ufficiali di bilancio depositati presso gli enti regolatori (es. SEC americana).\n🎯 **Cosa indica:** La salute finanziaria e la crescita reale dell'azienda basata su metriche contabili (come l'Utile per Azione).")
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Segnale Fondamentale", f"{sec_res['signal']:.2f}")
+            eps_growth = sec_res.get('metadata', {}).get('eps_growth', 0)
+            mcol2.metric("Crescita EPS", f"{eps_growth:.1%}", help="Earnings Per Share (Utile per Azione): misura la crescita della redditività dell'azienda.")
+            mcol3.metric("Confidenza", f"{sec_res['confidence']:.0%}", help="Affidabilità del dato di bilancio: basata sulla quantità e sulla qualità dei dati storici estratti dalla SEC.")
+            st.write(f"**Ragionamento:** {sec_res['reasoning']}")
+            
+        with st.expander(f"{smart_money_agent.name} su {ticker} (Segnale: {smart_money_res['signal']:.2f})", expanded=True):
+            st.info("🐋 **Come agisce:** Monitora i flussi di capitale dei grandi fondi (Hedge Fund) e le compravendite dei dirigenti dell'azienda.\n🎯 **Cosa indica:** Dove i portafogli pesanti e chi ha informazioni interne stanno mettendo i propri soldi, anticipando spesso il mercato retail.")
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Segnale Istituzionale", f"{smart_money_res['signal']:.2f}")
+            mcol2.metric("Insider Flow", f"{smart_money_res.get('metadata', {}).get('net_insider_buying_score', 0):.2f}", help="Misura da -1 (Forti Vendite) a +1 (Forti Acquisti) degli Insider.")
+            mcol3.metric("Confidenza", f"{smart_money_res['confidence']:.0%}", help="Solidità del segnale: indica la magnitudo dei capitali mossi e quanto chiare e inequivocabili sono le transazioni degli Insider.")
+            st.write(f"**Ragionamento:**\n{smart_money_res['reasoning']}")
+            
+        with st.expander(f"{risk_agent.name} su {ticker} (Rischio: {risk_res.get('metadata', {}).get('risk_level', 'N/A')})", expanded=True):
+            st.info("⚠️ **Come agisce:** Analizza la volatilità storica dei rendimenti e il Massimo Drawdown registrato.\n🎯 **Cosa indica:** Se il titolo è soggetto a forti oscillazioni che potrebbero causare perdite repentine, permettendoti di dosare correttamente l'investimento.")
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Risk Score", f"{risk_res.get('metadata', {}).get('risk_score', 0):.2f}", help="Punteggio sintetico da 0 a 1: un valore vicino a 1 indica un rischio altissimo.")
+            mcol2.metric("Volatilità", f"{risk_res.get('metadata', {}).get('volatility', 0):.1%}", help="Misura quanto il prezzo del titolo oscilla violentemente su base annua.")
+            mcol3.metric("Max Drawdown", f"{risk_res.get('metadata', {}).get('max_drawdown', 0):.1%}", help="La percentuale di perdita massima storica che il titolo ha registrato nel periodo analizzato.")
+            st.write(f"**Ragionamento:**\n{risk_res['reasoning']}")
+
+        # -------------------------------------------------------------------------
+        # AGGIUNTA ALERT USCITA IA (Valutazione determinazioni agenti dedicati alla vendita)
+        # -------------------------------------------------------------------------
+        try:
+            auto_agent = AutotradingAgent()
+            exit_data_payload = {
+                'market_data': df,
+                'df': df,
+                'news_res': news_res,
+                'sec_res': sec_res,
+                'smart_money_res': smart_money_res,
+                'risk_res': risk_res,
+                'company_info': company_info
+            }
+            exit_eval = auto_agent.run_exit_analysis(ticker, current_shares=100, avg_price=df['Close'].iloc[0], data_payload=exit_data_payload)
+            exit_score = exit_eval.get('exit_score', 0.0)
+            exit_rec = exit_eval.get('recommendation', 'MANTIENI')
+            
+            # Mostra l'alert visivo dedicato con cornicetta rossa e stile prioritario
+            if exit_score >= 0.35:
+                st.markdown("---")
+                border_color = "#ff3333" if exit_score >= 0.65 else "#ff6666"
+                bg_color = "rgba(255, 51, 51, 0.08)" if exit_score >= 0.65 else "rgba(255, 102, 102, 0.06)"
+                badge_text = "🚨 ALLERTA VENDITA TOTALE / STOP LOSS" if exit_score >= 0.65 else "⚠️ ALLERTA VENDITA PARZIALE / TAKE PROFIT"
+                
+                trigger_items = ""
+                for d in exit_eval.get('details', []):
+                    ag_name = d.get('agent_name', 'Agente')
+                    ag_sig = d.get('exit_signal', 0.0)
+                    ag_reason = d.get('reasoning', '')
+                    if ag_sig > 0.2:
+                        trigger_items += f"<li style='margin-bottom: 6px;'><b>{ag_name}</b> (Segnale Vendita: <code>{ag_sig:.2f}</code>): {ag_reason}</li>"
+                        
+                alert_html = f"""
+                <div style="border: 2px solid {border_color}; border-radius: 12px; background-color: {bg_color}; padding: 20px 24px; margin: 25px 0 20px 0; box-shadow: 0 4px 18px rgba(255, 51, 51, 0.18);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 51, 51, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
+                        <div>
+                            <span style="background-color: {border_color}; color: white; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.85rem; letter-spacing: 0.5px;">{badge_text}</span>
+                            <h3 style="margin: 8px 0 0 0; color: {border_color};">Radar di Uscita AI ({ticker})</h3>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.85rem; color: gray;">Exit Score:</div>
+                            <div style="font-size: 1.8rem; font-weight: bold; color: {border_color};">{exit_score:.0%}</div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 14px; font-size: 1.05rem;">
+                        <b>Raccomandazione:</b> <span style="color: {border_color}; font-weight: bold;">{exit_rec}</span> | <b>Confidenza:</b> {exit_eval.get('confidence', 0):.0%}
+                    </div>
+                    <div style="margin-bottom: 12px; font-size: 0.95rem; line-height: 1.4;">
+                        <b>Sintesi Motivazionale:</b> {exit_eval.get('reasoning', '')}
+                    </div>
+                    {f"<div style='margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,51,51,0.25); font-size: 0.9rem;'><b style='color: {border_color};'>Determinazioni degli Agenti di Uscita:</b><ul style='margin-top: 6px; padding-left: 20px;'>{trigger_items}</ul></div>" if trigger_items else ""}
+                </div>
+                """
+                st.markdown(alert_html, unsafe_allow_html=True)
+            else:
+                with st.expander(f"🛡️ Radar di Uscita AI ({ticker}) - Stato: Posizione Regolare (Exit Score: {exit_score:.0%})", expanded=False):
+                    ecol1, ecol2, ecol3 = st.columns(3)
+                    ecol1.metric("Exit Score", f"{exit_score:.0%}")
+                    ecol2.metric("Determinazione", exit_rec)
+                    ecol3.metric("Confidenza", f"{exit_eval.get('confidence', 0):.0%}")
+                    st.info(f"Nessun alert di vendita attivo. {exit_eval.get('reasoning', '')}")
+        except Exception as e:
+            pass
+            
+        return final_result
+
+# ---------------------------------------------------------
+# Autenticazione e Protezione Accesso Riservato
+# ---------------------------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("""
+    <style>
+    .login-box {
+        background-color: #1a2230;
+        border: 1px solid #2d3748;
+        border-radius: 14px;
+        padding: 30px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+        margin-top: 50px;
+        text-align: center;
+    }
+    .login-title {
+        color: #ffffff;
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+    .login-sub {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        margin-bottom: 20px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col_l1, col_l2, col_l3 = st.columns([1, 1.4, 1])
+    with col_l2:
+        st.markdown("""
+        <div class="login-box">
+            <div style="font-size: 2.8rem; margin-bottom: 8px;">🔐</div>
+            <div class="login-title">Market Intelligence Engine</div>
+            <div class="login-sub">Accesso Riservato ad Utente Autorizzato</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("login_form", clear_on_submit=False):
+            username_input = st.text_input("Username", value="", placeholder="Inserisci username", autocomplete="username")
+            password_input = st.text_input("Password", type="password", placeholder="Inserisci password", autocomplete="current-password")
+            submit_login = st.form_submit_button("🔓 Accedi all'Applicazione", use_container_width=True, type="primary")
+            
+            if submit_login:
+                if verify_user_credentials(username_input, password_input):
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"] = username_input
+                    st.success("Accesso autorizzato!")
+                    st.rerun()
+                else:
+                    st.error("❌ Credenziali non valide. Accesso negato.")
+        
+    st.stop()
+
+# ---------------------------------------------------------
+# Navigazione Laterale (Utente Autenticato)
+# ---------------------------------------------------------
+user_display = st.session_state.get('username', 'Rodas73')
+st.sidebar.markdown(f"""
+<div style="background-color: #1a2230; padding: 10px 14px; border-radius: 10px; border: 1px solid #2d3748; margin-bottom: 12px;">
+    <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Sessione Attiva</div>
+    <div style="font-weight: bold; color: #38bdf8; font-size: 1.05rem;">👤 {user_display}</div>
+</div>
+""", unsafe_allow_html=True)
+
+if st.sidebar.button("🚪 Disconnetti", use_container_width=True):
+    st.session_state["authenticated"] = False
+    st.session_state.pop("username", None)
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.title("Navigazione")
+page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Screener IA", "💼 Paper Trading", "🤖 AI Autotrading"])
+
+# Definizione Liste Titoli
+market_lists = {
+    "Milano": [
+        "A2A.MI", "AMP.MI", "AZM.MI", "BPE.MI", "BMED.MI", "BAMI.MI", "BZU.MI", "CPR.MI", 
+        "CNHI.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "RACE.MI", "F.MI", 
+        "G.MI", "HER.MI", "INW.MI", "ISP.MI", "IG.MI", "LDO.MI", "MB.MI", "MONC.MI", 
+        "NEXI.MI", "PST.MI", "PRY.MI", "REC.MI", "SRG.MI", "SPM.MI", "STLAM.MI", "STM.MI", 
+        "TEN.MI", "TRN.MI", "TIT.MI", "UCG.MI", "UNI.MI", "IP.MI",
+        "BRE.MI", "TGYM.MI", "FCT.MI", "PIA.MI", "SFER.MI", "TOD.MI", "SIT.MI",
+        "MFEB.MI", "OVS.MI", "SESA.MI", "TIS.MI", "WBD.MI", "DOV.MI", "JUVE.MI", "ASR.MI",
+        "LSS.MI", "MARR.MI", "MA.MI", "RENO.MI", "ENAV.MI", "BFF.MI", "MFEA.MI", "ZIGN.MI",
+        "GVS.MI", "ARGO.MI", "SAB.MI", "LUIS.MI", "PHIN.MI", "SIA.MI", "TIN.MI", "SAL.MI",
+        "BIES.MI", "CEM.MI", "DAN.MI", "DAT.MI", "DIB.MI", "EDN.MI", "EUK.MI", "FID.MI",
+        "FNC.MI", "GEO.MI", "IGD.MI", "IMA.MI", "IREN.MI", "ITM.MI", "LIT.MI", "MTV.MI",
+        "MND.MI", "PRT.MI", "RCS.MI", "RET.MI", "SFI.MI", "TAS.MI", "TXT.MI", "VLA.MI", "ZUC.MI"
+    ],
+    "New York": [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B", "UNH", "JNJ",
+        "JPM", "V", "PG", "XOM", "HD", "CVX", "MA", "ABBV", "MRK", "PEP",
+        "COST", "AVGO", "KO", "TMO", "CSCO", "MCD", "CRM", "ABT", "DHR", "ACN",
+        "NFLX", "AMD", "INTC", "QCOM", "TXN", "SLB", "COP", "EOG", "PXD", "MPC",
+        "GOOG", "WMT", "NKE", "DIS", "BA", "IBM", "ORCL", "AMAT", "MU", "LRCX",
+        "ADI", "KLAC", "NXPI", "MRVL", "MCHP", "SWKS", "TER", "QRVO", "WDC", "STX",
+        "HPQ", "HPE", "DELL", "NTAP", "ANET", "JNPR", "GLW", "MSI", "ZBRA", "TRMB",
+        "KEYS", "TDY", "IT", "CDW", "EPAM", "CTSH", "AKAM", "FTNT", "PANW", "CRWD",
+        "ZS", "OKTA", "NET", "FSLY", "DDOG", "SNOW", "PLTR", "U", "RBLX", "PATH",
+        "MNDY", "ASAN", "SMAR", "DOCN", "FIVN", "TENB", "VRNS", "CHKP"
+    ],
+    "Parigi": [
+        "MC.PA", "OR.PA", "RMS.PA", "TTE.PA", "SAN.PA", "AIR.PA", "SU.PA", "AI.PA",
+        "BNP.PA", "EL.PA", "CS.PA", "DG.PA", "SAF.PA", "BN.PA", "SGO.PA", "CAP.PA",
+        "ACA.PA", "GLE.PA", "LR.PA", "EN.PA", "VIE.PA", "ENGI.PA", "ORA.PA", "RNO.PA",
+        "ML.PA", "RI.PA", "KER.PA", "VIV.PA", "PUB.PA", "EDEN.PA", "HO.PA", "URW.PA",
+        "CA.PA", "WLN.PA", "ERF.PA", "DSY.PA", "AC.PA", "ALO.PA", "FGA.PA", "AMUN.PA",
+        "BVI.PA", "GET.PA", "SPIE.PA", "SOI.PA", "VK.PA", "ATE.PA", "SK.PA", "DEC.PA",
+        "GFC.PA", "ICAD.PA", "NEX.PA", "RCO.PA", "TE.PA", "VIRP.PA", "ELIS.PA", "BEN.PA",
+        "COFA.PA", "DIM.PA", "GTT.PA", "NK.PA", "VANTI.PA", "NXI.PA", "ATO.PA", "IPN.PA",
+        "TFI.PA", "MT.AS", "STLAP.PA", "CARM.PA", "UBI.PA", "DBV.PA", "NRO.PA"
+    ],
+    "Francoforte": [
+        "SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "VOW3.DE", "MBG.DE", "BMW.DE", "BAS.DE",
+        "MUV2.DE", "IFX.DE", "BAYN.DE", "DHL.DE", "MRK.DE", "HEN3.DE", "EOAN.DE", "BEI.DE",
+        "DBK.DE", "RWE.DE", "VNA.DE", "ADS.DE", "DTG.DE", "FRE.DE", "FME.DE", "HEI.DE",
+        "HNR1.DE", "CON.DE", "MTX.DE", "PAH3.DE", "P911.DE", "QIA.DE", "RHM.DE", "SHL.DE",
+        "SY1.DE", "ZAL.DE", "CBK.DE", "ENR.DE", "SRT3.DE", "BNR.DE", "EVK.DE", "KRN.DE",
+        "LEG.DE", "G1A.DE", "FRA.DE", "HFG.DE", "PUM.DE", "LHA.DE", "TLX.DE", "AIXA.DE",
+        "EVD.DE", "FPE3.DE", "GXI.DE", "NEM.DE", "TEG.DE", "WCH.DE", "BOSS.DE", "G24.DE",
+        "TKA.DE", "EVT.DE", "GFT.DE", "SMHN.DE", "SDF.DE", "HLE.DE", "HAG.DE", "DEQ.DE",
+        "DEZ.DE", "KBX.DE", "VOS.DE", "WAC.DE", "DUE.DE", "AMZ.DE"
+    ]
+}
+
+# ---------------------------------------------------------
+# PAGE 1: 📡 Live Analysis
+# ---------------------------------------------------------
+if page == "📡 Live Analysis":
+    st.title("📈 Motore di Intelligenza di Mercato (Live)")
+    st.markdown("Plancia di comando: Analisi portafoglio, ricerca ad-hoc e scansione opportunità massiva.")
+
+    # 1. Ricerca Ad-Hoc
+    st.header("🔍 Ricerca Ad-Hoc")
+    
+    search_mode = st.radio("Metodo di inserimento:", ["Selezione da Lista (Mercati)", "Inserimento Libero"], horizontal=True)
+    
+    col_search, col_btn, col_clear = st.columns([2, 1, 1])
+    
+    ad_hoc_ticker = ""
+    if search_mode == "Selezione da Lista (Mercati)":
+        with col_search:
+            col_mkt, col_tkr = st.columns(2)
+            with col_mkt:
+                sel_market = st.selectbox("Seleziona Mercato:", list(market_lists.keys()))
+            with col_tkr:
+                ad_hoc_ticker = st.selectbox(
+                    "Seleziona Titolo:", 
+                    market_lists[sel_market],
+                    format_func=lambda x: f"{x} - {TICKER_NAMES.get(x, 'Nome Sconosciuto')}"
+                )
+    else:
+        with col_search:
+            ad_hoc_ticker = st.text_input("Inserisci un Ticker (es. AAPL, ENEL.MI, TSLA):").upper().strip()
+            
+    with col_btn:
+        st.write("")
+        st.write("")
+        search_btn = st.button("Analizza Singolo Titolo")
+        
+    with col_clear:
+        st.write("")
+        st.write("")
+        clear_btn = st.button("Chiudi Ricerca", help="Torna all'analisi del portafoglio")
+
+    if clear_btn:
+        st.session_state['ad_hoc_search'] = None
+        st.rerun()
+
+    if search_btn and ad_hoc_ticker:
+        st.session_state['ad_hoc_search'] = ad_hoc_ticker
+
+    portfolio = get_portfolio()
+    portfolio_tickers = [p['ticker'] for p in portfolio] if portfolio else []
+
+    if st.session_state.get('ad_hoc_search'):
+        st.subheader(f"Risultati Ricerca: {st.session_state['ad_hoc_search']}")
+        render_single_analysis(st.session_state['ad_hoc_search'])
+        st.markdown("---")
+    else:
+        # 2. Analisi Portafoglio (mostrato solo se non si sta facendo una ricerca ad-hoc)
+        st.header("💼 Analisi Portafoglio Attivo")
+        
+        if portfolio_tickers:
+            data_client = MarketDataClient()
+            tab_names = []
+            for t in portfolio_tickers:
+                c_name = data_client.get_company_info(t).get('shortName', '')
+                tab_names.append(f"{t} ({c_name})" if c_name else t)
+                
+            tabs = st.tabs(tab_names)
+            for idx, ticker in enumerate(portfolio_tickers):
+                with tabs[idx]:
+                    render_single_analysis(ticker)
+        else:
+            st.info("Nessun titolo in portafoglio. Cerca un titolo o avvia la scansione opportunità.")
+    
+        st.markdown("---")
+
+    # 3. Scansione Opportunità Massiva
+    st.header("🚀 Scansione Opportunità Massiva")
+    st.markdown("Seleziona la piazza finanziaria da scansionare per trovare le migliori occasioni di acquisto in tempo reale.")
+    
+    col_mi, col_ny, col_pa, col_fr = st.columns(4)
+    with col_mi:
+        scan_mi = st.button("🇮🇹 Scansiona Milano")
+    with col_ny:
+        scan_ny = st.button("🇺🇸 Scansiona New York")
+    with col_pa:
+        scan_pa = st.button("🇫🇷 Scansiona Parigi")
+    with col_fr:
+        scan_fr = st.button("🇩🇪 Scansiona Francoforte")
+    
+    market_to_scan = None
+    if scan_mi:
+        market_to_scan = "Milano"
+    elif scan_ny:
+        market_to_scan = "New York"
+    elif scan_pa:
+        market_to_scan = "Parigi"
+    elif scan_fr:
+        market_to_scan = "Francoforte"
+
+    def update_top_5_cards(current_results, market_name):
+        sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
+        if not sorted_res:
+            return
+            
+        with top_5_placeholder.container():
+            st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {market_name}")
+            
+            for i, r in enumerate(sorted_res):
+                c_name = TICKER_NAMES.get(r['ticker'], '')
+                title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
+                with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
+                    def fmt_sig(val):
+                        return f"{val:+.2f}" if val is not None else "N/A"
+                        
+                    sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
+                    risk_level = r.get('risk_level', 'SCONOSCIUTO')
+                    
+                    html_content = f"""
+                    <div style="text-align: center; margin-bottom: 10px;">
+                        <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
+                        <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
+                    </div>
+                    <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
+                        <i>"{r['prediction']}"</i>
+                    </div>
+                    <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
+                        <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
+                        <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
+                        <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
+                        <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
+                    </div>
+                    """
+                    st.markdown(html_content, unsafe_allow_html=True)
+
+    def render_completed_top_5(current_results, market_name):
+        if not current_results:
+            return
+        sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
+        if not sorted_res:
+            return
+            
+        st.subheader(f"🏆 Tabella Top 5 Titoli con Score Maggiore - {market_name}")
+        table_rows = []
+        for i, r in enumerate(sorted_res):
+            c_name = TICKER_NAMES.get(r['ticker'], '')
+            table_rows.append({
+                'Posizione': f"#{i+1}",
+                'Ticker': r['ticker'],
+                'Nome Azienda': c_name if c_name else r['ticker'],
+                'Segnale AI': f"{r['final_signal']:+.2f}",
+                'Previsione': r['prediction'],
+                'Confidenza': f"{r['confidence']:.0%}",
+                'Rischio': r.get('risk_level', 'SCONOSCIUTO'),
+                'Tecnico': f"{r.get('price_sig', 0.0):+.2f}" if r.get('price_sig') is not None else "-",
+                'Sentiment': f"{r.get('news_sig', 0.0):+.2f}" if r.get('news_sig') is not None else "-",
+                'Fondamentali': f"{r.get('sec_sig', 0.0):+.2f}" if r.get('sec_sig') is not None else "-",
+                'Smart Money': f"{r.get('smart_sig', 0.0):+.2f}" if r.get('smart_sig') is not None else "-"
+            })
+        st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+        
+        st.markdown("#### 🔍 Schede Dettagliate Top 5")
+        for i, r in enumerate(sorted_res):
+            c_name = TICKER_NAMES.get(r['ticker'], '')
+            title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
+            with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
+                def fmt_sig(val):
+                    return f"{val:+.2f}" if val is not None else "N/A"
+                    
+                sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
+                risk_level = r.get('risk_level', 'SCONOSCIUTO')
+                
+                html_content = f"""
+                <div style="text-align: center; margin-bottom: 10px;">
+                    <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
+                    <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
+                </div>
+                <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
+                    <i>"{r['prediction']}"</i>
+                </div>
+                <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
+                    <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
+                    <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
+                    <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
+                    <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
+                </div>
+                """
+                st.markdown(html_content, unsafe_allow_html=True)
+
+    if market_to_scan:
+        all_candidates = market_lists[market_to_scan]
+        candidates = [t for t in all_candidates if t not in portfolio_tickers]
+        
+        st.info(f"Inizio scansione di {len(candidates)} titoli per la piazza di {market_to_scan}...")
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        top_5_placeholder = st.empty()
+        results = []
+        
+        price_agent = PriceAgent()
+        news_agent = NewsAgent()
+        sec_agent = SECAgent()
+        smart_money_agent = SmartMoneyAgent()
+        risk_agent = RiskAgent()
+        macro_agent = MacroAgent()
+        fusion_engine = SignalFusionEngine()
+        data_client = MarketDataClient()
+
+        for idx, ticker in enumerate(candidates):
+            tk_label = TICKER_NAMES.get(ticker, ticker)
+            status_text.text(f"Analisi {idx+1}/{len(candidates)}: {ticker} ({tk_label})...")
+            try:
+                df = data_client.get_historical_prices(ticker, period="6mo")
+                if not df.empty:
+                    data_payload = {"market_data": df}
+                    
+                    price_res = price_agent.analyze(ticker, data_payload)
+                    price_res['agent_name'] = price_agent.name
+                    
+                    news_res = news_agent.analyze(ticker, data_payload)
+                    news_res['agent_name'] = news_agent.name
+                    
+                    sec_res = sec_agent.analyze(ticker, data_payload)
+                    sec_res['agent_name'] = sec_agent.name
+                    
+                    smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+                    smart_money_res['agent_name'] = smart_money_agent.name
+                    
+                    risk_res = risk_agent.analyze(ticker, data_payload)
+                    risk_res['agent_name'] = risk_agent.name
+                    
+                    macro_res = macro_agent.analyze(ticker, data_payload)
+                    macro_res['agent_name'] = macro_agent.name
+                    
+                    res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res])
+                    
+                    save_signal(
+                        ticker=ticker, 
+                        prediction=res_fusion['prediction'], 
+                        final_signal=res_fusion['final_signal'], 
+                        confidence=res_fusion['confidence'], 
+                        risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
+                        raw_data=res_fusion
+                    )
+                    
+                    results.append({
+                        'ticker': ticker,
+                        'final_signal': res_fusion['final_signal'],
+                        'confidence': res_fusion['confidence'],
+                        'prediction': res_fusion['prediction'],
+                        'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                        'price_sig': price_res.get('signal'),
+                        'news_sig': news_res.get('signal'),
+                        'sec_sig': sec_res.get('signal'),
+                        'smart_sig': smart_money_res.get('signal')
+                    })
+            except Exception as e:
+                pass
+                
+            if results:
+                update_top_5_cards(results, market_to_scan)
+                
+            progress_bar.progress((idx + 1) / len(candidates))
+            
+        status_text.success("Scansione completata!")
+        st.session_state['live_scan_results'] = results
+        st.session_state['live_scan_market'] = market_to_scan
+        with top_5_placeholder.container():
+            render_completed_top_5(results, market_to_scan)
+    elif st.session_state.get('live_scan_results'):
+        st.markdown("---")
+        render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
+
+# ---------------------------------------------------------
+# PAGE 2: 🔎 Screener IA
+# ---------------------------------------------------------
+elif page == "🔎 Screener IA":
+    st.title("🔎 Screener d'Investimento IA")
+    st.markdown("Filtra i migliori titoli in base alle metriche combinate dei nostri agenti AI.")
+    
+    sel_market_scr = st.selectbox("Seleziona Mercato da Scansionare:", list(market_lists.keys()))
+    min_signal = st.slider("Soglia Minima Segnale Acquisto:", -1.0, 1.0, 0.20, step=0.05)
+    
+    if st.button("Avvia Screener IA"):
+        candidates = market_lists[sel_market_scr]
+        st.info(f"Analisi di {len(candidates)} titoli su {sel_market_scr}...")
+        
+        p_agent = PriceAgent()
+        n_agent = NewsAgent()
+        sec_agent = SECAgent()
+        sm_agent = SmartMoneyAgent()
+        r_agent = RiskAgent()
+        fusion = SignalFusionEngine()
+        data_client = MarketDataClient()
+        
+        results = []
+        bar = st.progress(0)
+        status_scr = st.empty()
+        top_5_scr_placeholder = st.empty()
+
+        def update_top_5_scr_ui(current_results):
+            sorted_scr = sorted(current_results, key=lambda x: x['Segnale AI'], reverse=True)[:5]
+            if not sorted_scr:
+                return
+            with top_5_scr_placeholder.container():
+                st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {sel_market_scr}")
+                for i, r in enumerate(sorted_scr):
+                    tk = r['Ticker']
+                    name = r['Nome']
+                    sig = r['Segnale AI']
+                    conf = r['Confidenza']
+                    risk = r['Rischio']
+                    pred = r['Previsione']
+                    sig_color = "green" if sig > 0 else "red" if sig < 0 else "gray"
+                    
+                    with st.expander(f"#{i+1} {tk} ({name}) | Segnale AI: {sig:.2f} | Confidenza: {conf}", expanded=(i==0)):
+                        st.markdown(f"""
+                        <div style="display: flex; justify-content: space-around; align-items: center; padding: 12px; background-color: rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 10px;">
+                            <div style="text-align: center;"><b>Previsione:</b><br>{pred}</div>
+                            <div style="text-align: center;"><span style="font-size: 1.6rem; font-weight: bold; color: {sig_color};">Segnale: {sig:.2f}</span></div>
+                            <div style="text-align: center;"><b>Rischio:</b><br>{risk}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.write(f"**Confidenza Globale dell'Analisi:** {conf}")
+
+        for idx, ticker in enumerate(candidates):
+            tk_name = TICKER_NAMES.get(ticker, ticker)
+            status_scr.text(f"Analisi Screener {idx+1}/{len(candidates)}: {ticker} ({tk_name})...")
+            try:
+                df = data_client.get_historical_prices(ticker, period="3mo")
+                if not df.empty:
+                    data_payload = {"market_data": df}
+                    p_res = p_agent.analyze(ticker, data_payload)
+                    p_res['agent_name'] = p_agent.name
+                    n_res = n_agent.analyze(ticker, data_payload)
+                    n_res['agent_name'] = n_agent.name
+                    sec_res = sec_agent.analyze(ticker, data_payload)
+                    sec_res['agent_name'] = sec_agent.name
+                    sm_res = sm_agent.analyze(ticker, data_payload)
+                    sm_res['agent_name'] = sm_agent.name
+                    r_res = r_agent.analyze(ticker, data_payload)
+                    r_res['agent_name'] = r_agent.name
+                    
+                    fusion_res = fusion.process_signals([p_res, n_res, sec_res, sm_res, r_res])
+                    
+                    if fusion_res['final_signal'] >= min_signal:
+                        results.append({
+                            'Ticker': ticker,
+                            'Nome': TICKER_NAMES.get(ticker, ticker),
+                            'Segnale AI': round(fusion_res['final_signal'], 2),
+                            'Previsione': fusion_res['prediction'],
+                            'Confidenza': f"{fusion_res['confidence']:.0%}",
+                            'Rischio': r_res.get('metadata', {}).get('risk_level', 'MEDIO')
+                        })
+                        update_top_5_scr_ui(results)
+            except Exception:
+                pass
+            bar.progress((idx + 1) / len(candidates))
+            
+        status_scr.success("Screener completato!")
+        update_top_5_scr_ui(results)
+        
+        if results:
+            st.markdown("---")
+            st.subheader("📋 Tabella Completa Risultati Screener")
+            df_res = pd.DataFrame(results).sort_values(by='Segnale AI', ascending=False)
+            st.dataframe(df_res, width="stretch", hide_index=True)
+        else:
+            st.warning("Nessun titolo supera la soglia di segnale selezionata.")
+
+# ---------------------------------------------------------
+# PAGE 3: 💼 Paper Trading
+# ---------------------------------------------------------
+elif page == "💼 Paper Trading":
+    st.title("💼 Simulatore di Portafoglio (Paper Trading)")
+    st.markdown("Gestisci i tuoi investimenti virtuali. Usa la scheda Live o Screener per trovare opportunità, e compra qui sotto.")
+
+    portfolio = get_portfolio()
+    data_client = MarketDataClient()
+    
+    portfolio_val = 0.0
+    total_unrealized = 0.0
+    portfolio_rows = []
+    
+    for item in portfolio:
+        t = item['ticker']
+        sh = item['shares']
+        avg_p = item['avg_purchase_price']
+        
+        df_curr = data_client.get_historical_prices(t, period="5d")
+        curr_p = df_curr['Close'].iloc[-1] if not df_curr.empty else avg_p
+        
+        val = sh * curr_p
+        unrealized = (curr_p - avg_p) * sh
+        unrealized_pct = ((curr_p - avg_p) / avg_p) if avg_p > 0 else 0.0
+        
+        portfolio_val += val
+        total_unrealized += unrealized
+        
+        c_name = TICKER_NAMES.get(t, '')
+        display_ticker = f"{t} ({c_name})" if c_name else t
+        
+        buy_sig = item.get('buy_signal')
+        sig_fmt = f"{buy_sig:.2f}" if buy_sig is not None else "N/A"
+        
+        portfolio_rows.append({
+            'Ticker': display_ticker,
+            'Azioni': sh,
+            'Segnale Acquisto': sig_fmt,
+            'Prezzo Carico': f"€{avg_p:.2f}",
+            'Prezzo Attuale': f"€{curr_p:.2f}",
+            'Controvalore': f"€{val:,.2f}",
+            'P&L Non Realizzato': f"€{unrealized:,.2f} ({unrealized_pct:+.1%})"
+        })
+
+    summary = get_paper_account_summary(portfolio_value=portfolio_val)
+    trades = get_trade_history()
+    total_realized = sum(t['profit_loss'] for t in trades if t['profit_loss'] is not None)
+
+    # BANNER QUADRO FINANZIARIO & CAPITALE INIZIALE
+    st.markdown("### 🏦 Quadro Finanziario & Risorse Iniziali")
+    overall_pl = summary['total_equity'] - summary['total_deposited']
+    overall_pl_pct = (overall_pl / summary['total_deposited']) if summary['total_deposited'] > 0 else 0.0
+    pl_delta_color = "normal"
+    
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1.metric("💰 Capitale Iniziale", f"€{summary['total_deposited']:,.2f}", help="Somma totale dei depositi e delle risorse economiche iniziali caricate sul conto.")
+    kpi2.metric("📅 Data Inizio", summary['start_date'], help="Data del primo deposito o della prima transazione registrata.")
+    kpi3.metric("💵 Liquidità (Cash)", f"€{summary['cash']:,.2f}", help="Capitale in euro disponibile per l'acquisto di nuovi titoli.")
+    kpi4.metric("📊 Valore Totale (Equity)", f"€{summary['total_equity']:,.2f}", help="Valore complessivo del conto (Liquidità + Controvalore Titoli).")
+    kpi5.metric("🎯 Guadagno/Perdita Totale", f"€{overall_pl:+,.2f}", delta=f"{overall_pl_pct:+.2%}", delta_color=pl_delta_color, help="Rendimento totale complessivo rispetto alle risorse economiche con cui hai iniziato.")
+
+    subk1, subk2 = st.columns(2)
+    subk1.metric("📈 P&L Non Realizzato Portafoglio", f"€{total_unrealized:+,.2f}")
+    subk2.metric("📉 P&L Realizzato Totale Transazioni", f"€{total_realized:+,.2f}")
+
+    with st.expander("📁 Gestione Depositi & Risorse Iniziali (Aggiungi/Rimuovi Fondi)"):
+        st.markdown("Visualizza l'elenco dei depositi effettuati sul conto o inserisci nuovi versamenti di capitale.")
+        dcol1, dcol2 = st.columns([2, 1])
+        with dcol1:
+            st.subheader("Elenco Depositi Registrati")
+            deposits_list = summary['deposits']
+            if deposits_list:
+                df_dep = pd.DataFrame(deposits_list)
+                df_dep['Importo (€)'] = df_dep['amount'].apply(lambda x: f"€{x:,.2f}")
+                df_dep_disp = df_dep[['id', 'date', 'Importo (€)', 'note']]
+                df_dep_disp.columns = ['ID Deposito', 'Data Inserimento', 'Importo', 'Origine / Note']
+                st.dataframe(df_dep_disp, width="stretch", hide_index=True)
+                st.info(f"**Somma Totale Risorse Economiche: €{summary['total_deposited']:,.2f}**")
+            else:
+                st.write("Nessun deposito registrato.")
+        with dcol2:
+            st.subheader("Registra Nuovo Deposito")
+            with st.form("dep_form"):
+                dep_val = st.number_input("Importo Deposito (€)", min_value=10.0, max_value=10000000.0, value=10000.0, step=1000.0)
+                dep_dt = st.date_input("Data Deposito", datetime.now())
+                dep_desc = st.text_input("Origine / Note", value="Versamento Capitale Iniziale")
+                if st.form_submit_button("➕ Aggiungi Deposito"):
+                    date_str = dep_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    add_paper_deposit(dep_val, dep_desc, date_str)
+                    st.success("Deposito registrato con successo!")
+                    st.rerun()
+
+    st.markdown("---")
+
+    # PORTAFOGLIO ATTIVO & NUOVA TRANSAZIONE
+    col_main, col_sidebar = st.columns([2, 1])
+    
+    with col_main:
+        st.subheader("Il Tuo Portafoglio Attivo")
+        if portfolio_rows:
+            df_port = pd.DataFrame(portfolio_rows)
+            st.dataframe(df_port, width="stretch", hide_index=True)
+            
+            unrealized_color = "normal"
+            st.metric(
+                label="Valore Totale Portafoglio Titoli",
+                value=f"€{portfolio_val:,.2f}",
+                delta=f"€{total_unrealized:+,.2f} ({(total_unrealized/portfolio_val if portfolio_val > 0 else 0):+.1%})",
+                delta_color=unrealized_color
+            )
+        else:
+            st.info("Nessuna posizione aperta al momento.")
+
+    with col_sidebar:
+        st.subheader("🛒 Nuova Transazione")
+        
+        t_ticker = st.text_input("Ticker (es. ENEL.MI, NVDA, AAPL):", key="paper_trade_ticker").upper().strip()
+        t_type = st.selectbox("Tipo Ordine:", ["BUY (Acquisto)", "SELL (Vendita)"], key="paper_trade_type")
+        t_shares = st.number_input("Quantità (Azioni):", min_value=1, value=10, step=1, key="paper_trade_shares")
+        
+        order_action = "BUY" if "BUY" in t_type else "SELL"
+        
+        if t_ticker:
+            try:
+                with st.spinner(f"Recupero quotazione per {t_ticker}..."):
+                    df_p = data_client.get_historical_prices(t_ticker, period="5d")
+                    
+                if df_p.empty:
+                    st.error(f"❌ Quotazione non disponibile per '{t_ticker}'. Verifica il simbolo.")
+                else:
+                    c_price = df_p['Close'].iloc[-1]
+                    op_value = c_price * t_shares
+                    c_name = TICKER_NAMES.get(t_ticker, '')
+                    label_ticker = f"{t_ticker} ({c_name})" if c_name else t_ticker
+                    
+                    # Controlli di validità
+                    can_execute = True
+                    held_shares = next((item['shares'] for item in portfolio if item['ticker'] == t_ticker), 0)
+                    
+                    if order_action == "BUY":
+                        residual_cash = summary['cash'] - op_value
+                        if op_value > summary['cash']:
+                            can_execute = False
+                            st.error(f"❌ Liquidità insufficiente! Servono €{op_value:,.2f}, ma hai solo €{summary['cash']:,.2f} disponibili.")
+                        else:
+                            st.info(f"""
+                            **📊 Preventivo Ordine di Acquisto:**
+                            * **Titolo:** {label_ticker}
+                            * **Prezzo Unitario Attuale:** €{c_price:.2f}
+                            * **Quantità:** {t_shares} azioni
+                            * **💵 Controvalore Totale:** **€{op_value:,.2f}**
+                            * **Liquidità Residua Stimata:** €{residual_cash:,.2f}
+                            """)
+                    else: # SELL
+                        if held_shares < t_shares:
+                            can_execute = False
+                            st.error(f"❌ Azioni insufficienti! Possiedi {held_shares} azioni di {t_ticker}, non puoi venderne {t_shares}.")
+                        else:
+                            st.info(f"""
+                            **📊 Preventivo Ordine di Vendita:**
+                            * **Titolo:** {label_ticker}
+                            * **Prezzo Unitario Attuale:** €{c_price:.2f}
+                            * **Quantità da Vendere:** {t_shares} azioni (su {held_shares} possedute)
+                            * **💵 Incasso Totale Stimato:** **€{op_value:,.2f}**
+                            """)
+                            
+                    if can_execute:
+                        st.markdown(f"**Vuoi procedere con l'operazione?**")
+                        col_confirm, col_cancel = st.columns(2)
+                        with col_confirm:
+                            if st.button(f"✅ Conferma {order_action}", type="primary", key="btn_confirm_trade"):
+                                execute_trade(t_ticker, order_action, t_shares, c_price)
+                                st.success(f"Operazione {order_action} eseguita con successo per {t_shares} azioni di {t_ticker} a €{c_price:.2f} (Totale: €{op_value:,.2f})!")
+                                st.rerun()
+                        with col_cancel:
+                            if st.button("❌ Annulla", key="btn_cancel_trade"):
+                                st.rerun()
+            except Exception as e:
+                st.error(f"Errore nel calcolo del preventivo: {e}")
+
+    st.markdown("---")
+    
+    # STORICO TRANSAZIONI
+    st.subheader("Storico Transazioni")
+    if trades:
+        df_trades = pd.DataFrame(trades).sort_values(by=['id'], ascending=True)
+        df_trades['controvalore_num'] = df_trades['shares'] * df_trades['price']
+        df_trades['controvalore'] = df_trades['controvalore_num'].apply(lambda x: f"€{x:,.2f}")
+        df_trades['price_fmt'] = df_trades['price'].apply(lambda x: f"€{x:.2f}")
+        df_trades['pl_fmt'] = df_trades['profit_loss'].apply(lambda x: f"€{x:+,.2f}" if pd.notnull(x) and x != 0 else ("€0.00" if x == 0 else "-"))
+        
+        df_display = df_trades[['id', 'ticker', 'type', 'date', 'shares', 'price_fmt', 'controvalore', 'signal', 'pl_fmt']]
+        df_display.columns = ['ID', 'Ticker', 'Tipo', 'Data', 'Azioni', 'Prezzo Unitario', 'Controvalore Totale', 'Segnale AI', 'Profitti/Perdite']
+        st.dataframe(df_display, width="stretch", hide_index=True)
+        
+        st.metric("Profitti/Perdite Realizzati (Totale)", f"€{total_realized:+,.2f}")
+    else:
+        st.info("Nessuna operazione registrata.")
+
+# ---------------------------------------------------------
+# PAGE 4: 🤖 AI Autotrading
+# ---------------------------------------------------------
+elif page == "🤖 AI Autotrading":
+    st.title("🤖 Agente Autonomo di Trading (AI Autotrading)")
+    st.markdown("L'agente IA monitora autonomamente il mercato, esegue acquisti basati su segnali di consenso ed effettua uscite tramite il Radar di Uscita AI.")
+
+    account = get_agent_account()
+    agent_portfolio = get_agent_portfolio()
+    agent_trades = get_agent_trades()
+    data_client = MarketDataClient()
+
+    agent_port_val = 0.0
+    agent_unrealized = 0.0
+    agent_portfolio_rows = []
+
+    for p in agent_portfolio:
+        t = p['ticker']
+        sh = p['shares']
+        avg_p = p['avg_purchase_price']
+        
+        try:
+            df_curr = data_client.get_historical_prices(t, period="5d")
+            curr_p = df_curr['Close'].iloc[-1] if not df_curr.empty else avg_p
+        except Exception:
+            curr_p = avg_p
+            
+        val = sh * curr_p
+        unrealized = (curr_p - avg_p) * sh
+        unrealized_pct = ((curr_p - avg_p) / avg_p) if avg_p > 0 else 0.0
+        
+        agent_port_val += val
+        agent_unrealized += unrealized
+        
+        c_name = TICKER_NAMES.get(t, '')
+        display_ticker = f"{t} ({c_name})" if c_name else t
+        buy_sig = p.get('buy_signal')
+        sig_fmt = f"{buy_sig:+.2f}" if buy_sig is not None else "-"
+        
+        agent_portfolio_rows.append({
+            'ID': p.get('id', '-'),
+            'Ticker': display_ticker,
+            'Azioni': sh,
+            'Prezzo di Carico': f"€{avg_p:.2f}",
+            'Prezzo Attuale': f"€{curr_p:.2f}",
+            'Controvalore': f"€{val:,.2f}",
+            'P&L Non Realizzato': f"€{unrealized:+,.2f} ({unrealized_pct:+.1%})",
+            'Segnale Acquisto AI': sig_fmt
+        })
+
+    agent_equity = account['cash'] + agent_port_val
+    agent_pl = agent_equity - account['budget']
+    agent_pl_pct = (agent_pl / account['budget']) if account['budget'] > 0 else 0.0
+    agent_pl_color = "normal"
+
+    bcol1, bcol2, bcol3, bcol4 = st.columns(4)
+    bcol1.metric("💼 Budget Iniziale Assegnato", f"€{account['budget']:,.2f}", help="Capitale virtuale di partenza allocato all'agente autonomo.")
+    bcol2.metric("💵 Liquidità (Cash)", f"€{account['cash']:,.2f}", help="Cash non investito disponibile per nuove posizioni.")
+    bcol3.metric("📊 Valore Totale (Equity)", f"€{agent_equity:,.2f}", help="Patrimonio complessivo attuale (Liquidità + Controvalore Titoli).")
+    bcol4.metric("🎯 Guadagno/Perdita Totale", f"€{agent_pl:+,.2f}", delta=f"{agent_pl_pct:+.2%}", delta_color=agent_pl_color, help="Rendimento complessivo realizzato e non realizzato rispetto al budget di partenza. I valori negativi appaiono in rosso, i positivi in verde.")
+
+    with st.expander("⚙️ Configura Budget Agente"):
+        with st.form("set_budget_form"):
+            new_budget = st.number_input("Nuovo Budget Autotrading (€)", min_value=1000.0, max_value=1000000.0, value=account['budget'], step=5000.0)
+            if st.form_submit_button("Aggiorna Budget"):
+                set_agent_budget(new_budget)
+                st.success("Budget aggiornato con successo!")
+                st.rerun()
+
+    if st.button("🚀 Avvia Ciclo Autonomo di Trading (Esegui 1 Step)"):
+        with st.spinner("L'agente sta analizzando i mercati ed i titoli in portafoglio..."):
+            import importlib
+            import agents.autotrading_agent
+            importlib.reload(agents.autotrading_agent)
+            from agents.autotrading_agent import AutotradingAgent
+            
+            auto_agent = AutotradingAgent()
+            if hasattr(auto_agent, 'run_step'):
+                actions = auto_agent.run_step(market_lists['Milano'][:10])
+            else:
+                res = auto_agent.run_cycle()
+                actions = res.get('actions', [])
+                
+            st.session_state['last_auto_actions'] = actions
+            st.rerun()
+
+    if 'last_auto_actions' in st.session_state:
+        actions = st.session_state['last_auto_actions']
+        if actions:
+            for act in actions:
+                st.success(f"Azione Agente: {act}")
+        else:
+            st.info("Ciclo completato. Nessuna operazione eseguita nel ciclo corrente (criteri minimi non soddisfatti o liquidità allocata).")
+
+    col_ap, col_at = st.columns(2)
+    with col_ap:
+        st.subheader("💼 Portafoglio Agente IA")
+        if agent_portfolio_rows:
+            df_ap = pd.DataFrame(agent_portfolio_rows)
+            st.dataframe(df_ap, width="stretch", hide_index=True)
+        else:
+            st.info("L'agente non possiede titoli al momento.")
+
+    with col_at:
+        st.subheader("📜 Storico Operazioni Agente")
+        if agent_trades:
+            df_at = pd.DataFrame(agent_trades).sort_values(by=['id'], ascending=True)
+            df_at['Prezzo Unitario'] = df_at['price'].apply(lambda x: f"€{x:.2f}" if x > 0 else "-")
+            df_at['Controvalore'] = (df_at['shares'] * df_at['price']).apply(lambda x: f"€{x:,.2f}" if x > 0 else "-")
+            df_at['Commissione'] = df_at['commission'].apply(lambda x: f"€{x:.2f}")
+            df_at['Profitti/Perdite'] = df_at['profit_loss'].apply(lambda x: f"€{x:+,.2f}" if pd.notnull(x) and x != 0 else ("€0.00" if x == 0 else "-"))
+            df_at['Segnale AI'] = df_at['signal'].apply(lambda x: f"{x:+.2f}" if pd.notnull(x) else "-")
+            
+            df_at_disp = df_at[['id', 'ticker', 'type', 'date', 'shares', 'Prezzo Unitario', 'Controvalore', 'Commissione', 'Profitti/Perdite', 'Segnale AI']]
+            df_at_disp.columns = ['ID', 'Ticker', 'Tipo Ordine', 'Data & Ora', 'Azioni', 'Prezzo Unitario', 'Controvalore Totale', 'Commissione', 'Profitti / Perdite', 'Segnale AI']
+            st.dataframe(df_at_disp, width="stretch", hide_index=True)
+        else:
+            st.info("Nessuna operazione registrata dall'agente.")
