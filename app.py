@@ -478,14 +478,22 @@ if page == "📡 Live Analysis":
         def fmt_sig(val):
             return f"{val:+.2f}" if val is not None else "N/A"
 
-        def run_scan_and_store(market_name):
-            """Esegue la scansione e salva i risultati in session_state. Ritorna la lista dei risultati."""
+        def run_scan_and_store(market_name, progress_container):
+            """Esegue la scansione con output progressivo visibile. Ritorna la lista dei risultati."""
             all_candidates = market_lists[market_name]
             candidates = [t for t in all_candidates if t not in portfolio_tickers]
             
+            progress_container.write(f"📥 Scaricamento dati per **{len(candidates)} titoli** ({market_name})...")
             data_client = MarketDataClient()
             batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+            loaded = len([t for t in candidates if t in batch_data and batch_data[t] is not None and not batch_data[t].empty])
+            progress_container.write(f"✅ Download completato: **{loaded}/{len(candidates)}** titoli con dati validi.")
             
+            if loaded == 0:
+                progress_container.error("❌ Nessun dato scaricato da Yahoo Finance. Mercati chiusi o server non disponibile.")
+                return []
+            
+            progress_container.write("📊 Analisi macroeconomica globale (SPY)...")
             macro_agent = MacroAgent()
             macro_df = data_client.get_historical_prices("SPY", period="3mo")
             macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
@@ -499,47 +507,56 @@ if page == "📡 Live Analysis":
             risk_agent = RiskAgent()
             fusion_engine = SignalFusionEngine()
 
+            progress_bar = progress_container.progress(0, text="🧠 Analisi AI in corso...")
             results = []
-            for ticker in candidates:
+            valid_candidates = [t for t in candidates if t in batch_data and batch_data[t] is not None and not batch_data[t].empty]
+            total = len(valid_candidates)
+            
+            for idx, ticker in enumerate(valid_candidates):
                 try:
-                    df = batch_data.get(ticker, pd.DataFrame())
-                    if df is not None and not df.empty:
-                        data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
-                        price_res = price_agent.analyze(ticker, data_payload)
-                        price_res['agent_name'] = price_agent.name
-                        news_res = news_agent.analyze(ticker, data_payload)
-                        news_res['agent_name'] = news_agent.name
-                        sec_res = sec_agent.analyze(ticker, data_payload)
-                        sec_res['agent_name'] = sec_agent.name
-                        smart_money_res = smart_money_agent.analyze(ticker, data_payload)
-                        smart_money_res['agent_name'] = smart_money_agent.name
-                        risk_res = risk_agent.analyze(ticker, data_payload)
-                        risk_res['agent_name'] = risk_agent.name
-                        res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res_global])
-                        results.append({
-                            'ticker': ticker,
-                            'final_signal': res_fusion['final_signal'],
-                            'confidence': res_fusion['confidence'],
-                            'prediction': res_fusion['prediction'],
-                            'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
-                            'price_sig': price_res.get('signal'),
-                            'news_sig': news_res.get('signal'),
-                            'sec_sig': sec_res.get('signal'),
-                            'smart_sig': smart_money_res.get('signal')
-                        })
-                        try:
-                            save_signal(
-                                ticker=ticker,
-                                prediction=res_fusion['prediction'],
-                                final_signal=res_fusion['final_signal'],
-                                confidence=res_fusion['confidence'],
-                                risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'),
-                                raw_data=res_fusion
-                            )
-                        except Exception:
-                            pass
+                    df = batch_data[ticker]
+                    data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
+                    price_res = price_agent.analyze(ticker, data_payload)
+                    price_res['agent_name'] = price_agent.name
+                    news_res = news_agent.analyze(ticker, data_payload)
+                    news_res['agent_name'] = news_agent.name
+                    sec_res = sec_agent.analyze(ticker, data_payload)
+                    sec_res['agent_name'] = sec_agent.name
+                    smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+                    smart_money_res['agent_name'] = smart_money_agent.name
+                    risk_res = risk_agent.analyze(ticker, data_payload)
+                    risk_res['agent_name'] = risk_agent.name
+                    res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res_global])
+                    results.append({
+                        'ticker': ticker,
+                        'final_signal': res_fusion['final_signal'],
+                        'confidence': res_fusion['confidence'],
+                        'prediction': res_fusion['prediction'],
+                        'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                        'price_sig': price_res.get('signal'),
+                        'news_sig': news_res.get('signal'),
+                        'sec_sig': sec_res.get('signal'),
+                        'smart_sig': smart_money_res.get('signal')
+                    })
+                    try:
+                        save_signal(
+                            ticker=ticker,
+                            prediction=res_fusion['prediction'],
+                            final_signal=res_fusion['final_signal'],
+                            confidence=res_fusion['confidence'],
+                            risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                            raw_data=res_fusion
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error(f"Error analyzing {ticker}: {e}")
+                
+                pct = (idx + 1) / total
+                progress_bar.progress(pct, text=f"🧠 Analisi AI: {idx+1}/{total} titoli — {ticker}")
+            
+            progress_bar.progress(1.0, text=f"✅ Analisi completata: {len(results)} titoli elaborati!")
+            progress_container.write(f"🏆 Top 5 in elaborazione da {len(results)} titoli analizzati...")
             
             st.session_state['live_scan_results'] = results
             st.session_state['live_scan_market'] = market_name
@@ -609,13 +626,13 @@ if page == "📡 Live Analysis":
             scan_market = "Francoforte"
 
         if scan_market:
-            with st.spinner(f"⏳ Analisi {scan_market} in corso..."):
-                try:
-                    scan_results = run_scan_and_store(scan_market)
-                except Exception as e:
-                    logger.error(f"Errore scansione: {e}")
-                    st.error(f"❌ Errore: {e}")
-                    scan_results = []
+            progress_box = st.container(border=True)
+            progress_box.write(f"🚀 **Avvio scansione {scan_market}...**")
+            try:
+                scan_results = run_scan_and_store(scan_market, progress_box)
+            except Exception as e:
+                logger.error(f"Errore scansione: {e}")
+                progress_box.error(f"❌ Errore fatale durante la scansione: {e}")
 
         if st.session_state.get('live_scan_results'):
             render_top5(
