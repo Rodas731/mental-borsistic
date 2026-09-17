@@ -2,6 +2,16 @@ import yfinance as yf
 from textblob import TextBlob
 from core.base_agent import BaseAgent
 from loguru import logger
+import streamlit as st
+
+@st.cache_data(ttl=360, show_spinner=False)
+def _fetch_news_cached(ticker: str):
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.news
+    except Exception as e:
+        logger.error(f"Error fetching news for {ticker}: {e}")
+        return []
 
 class NewsAgent(BaseAgent):
     """
@@ -15,8 +25,7 @@ class NewsAgent(BaseAgent):
         logger.info(f"[{self.name}] Analyzing {ticker}...")
         
         try:
-            stock = yf.Ticker(ticker)
-            news = stock.news
+            news = _fetch_news_cached(ticker)
             
             if not news:
                 return {"signal": 0.0, "confidence": 0.0, "reasoning": "No recent news found."}

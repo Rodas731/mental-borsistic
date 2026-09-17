@@ -23,8 +23,12 @@ class MacroAgent(BaseAgent):
         The ticker is ignored because this agent always looks at SPY.
         """
         try:
-            # Fetch SPY data
-            df = self.market_client.get_historical_prices(self.proxy_ticker, period="3mo")
+            # Check if macro_data was pre-fetched in data payload
+            if data and "macro_data" in data and isinstance(data["macro_data"], pd.DataFrame) and not data["macro_data"].empty:
+                df = data["macro_data"]
+            else:
+                # Fetch SPY data (cached by MarketDataClient for 6 min)
+                df = self.market_client.get_historical_prices(self.proxy_ticker, period="3mo")
             if df.empty or len(df) < 20:
                 logger.warning("MacroAgent: Not enough SPY data, defaulting multiplier to 1.0")
                 return self._default_response()

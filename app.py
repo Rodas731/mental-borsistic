@@ -625,7 +625,7 @@ if page == "📡 Live Analysis":
         all_candidates = market_lists[market_to_scan]
         candidates = [t for t in all_candidates if t not in portfolio_tickers]
         
-        st.info(f"Inizio scansione di {len(candidates)} titoli per la piazza di {market_to_scan}...")
+        st.info(f"Inizio scansione rapida di {len(candidates)} titoli per la piazza di {market_to_scan}...")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -641,13 +641,27 @@ if page == "📡 Live Analysis":
         fusion_engine = SignalFusionEngine()
         data_client = MarketDataClient()
 
+        # 1. BATCH DOWNLOAD: Scarica tutti i prezzi in un'unica richiesta HTTP
+        status_text.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli ({market_to_scan})...")
+        batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+        
+        # 2. Pre-calcolo Macro trend (SPY) una sola volta per l'intera scansione
+        macro_df = data_client.get_historical_prices("SPY", period="3mo")
+        macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
+        macro_res_global = macro_agent.analyze(data=macro_payload)
+        macro_res_global['agent_name'] = macro_agent.name
+
         for idx, ticker in enumerate(candidates):
             tk_label = TICKER_NAMES.get(ticker, ticker)
-            status_text.text(f"Analisi {idx+1}/{len(candidates)}: {ticker} ({tk_label})...")
+            status_text.text(f"Analisi IA {idx+1}/{len(candidates)}: {ticker} ({tk_label})...")
             try:
-                df = data_client.get_historical_prices(ticker, period="6mo")
+                df = batch_data.get(ticker, pd.DataFrame())
+                # Fallback singolo se non presente nel batch
+                if df.empty:
+                    df = data_client.get_historical_prices(ticker, period="6mo")
+                    
                 if not df.empty:
-                    data_payload = {"market_data": df}
+                    data_payload = {"market_data": df, "macro_data": macro_df}
                     
                     price_res = price_agent.analyze(ticker, data_payload)
                     price_res['agent_name'] = price_agent.name
@@ -664,8 +678,7 @@ if page == "📡 Live Analysis":
                     risk_res = risk_agent.analyze(ticker, data_payload)
                     risk_res['agent_name'] = risk_agent.name
                     
-                    macro_res = macro_agent.analyze(ticker, data_payload)
-                    macro_res['agent_name'] = macro_agent.name
+                    macro_res = macro_res_global
                     
                     res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res])
                     
@@ -728,6 +741,9 @@ elif page == "🔎 Screener IA":
         fusion = SignalFusionEngine()
         data_client = MarketDataClient()
         
+        status_scr.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli...")
+        batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
+        
         results = []
         bar = st.progress(0)
         status_scr = st.empty()
@@ -762,7 +778,9 @@ elif page == "🔎 Screener IA":
             tk_name = TICKER_NAMES.get(ticker, ticker)
             status_scr.text(f"Analisi Screener {idx+1}/{len(candidates)}: {ticker} ({tk_name})...")
             try:
-                df = data_client.get_historical_prices(ticker, period="3mo")
+                df = batch_data.get(ticker, pd.DataFrame())
+                if df.empty:
+                    df = data_client.get_historical_prices(ticker, period="3mo")
                 if not df.empty:
                     data_payload = {"market_data": df}
                     p_res = p_agent.analyze(ticker, data_payload)
@@ -817,12 +835,17 @@ elif page == "💼 Paper Trading":
     total_unrealized = 0.0
     portfolio_rows = []
     
+    portfolio_tickers = [item['ticker'] for item in portfolio] if portfolio else []
+    batch_portfolio_dfs = data_client.get_batch_historical_prices(portfolio_tickers, period="5d") if portfolio_tickers else {}
+    
     for item in portfolio:
         t = item['ticker']
         sh = item['shares']
         avg_p = item['avg_purchase_price']
         
-        df_curr = data_client.get_historical_prices(t, period="5d")
+        df_curr = batch_portfolio_dfs.get(t, pd.DataFrame())
+        if df_curr.empty:
+            df_curr = data_client.get_historical_prices(t, period="5d")
         curr_p = df_curr['Close'].iloc[-1] if not df_curr.empty else avg_p
         
         val = sh * curr_p
@@ -1019,13 +1042,18 @@ elif page == "🤖 AI Autotrading":
     agent_unrealized = 0.0
     agent_portfolio_rows = []
 
+    agent_tickers = [p['ticker'] for p in agent_portfolio] if agent_portfolio else []
+    batch_agent_dfs = data_client.get_batch_historical_prices(agent_tickers, period="5d") if agent_tickers else {}
+
     for p in agent_portfolio:
         t = p['ticker']
         sh = p['shares']
         avg_p = p['avg_purchase_price']
         
         try:
-            df_curr = data_client.get_historical_prices(t, period="5d")
+            df_curr = batch_agent_dfs.get(t, pd.DataFrame())
+            if df_curr.empty:
+                df_curr = data_client.get_historical_prices(t, period="5d")
             curr_p = df_curr['Close'].iloc[-1] if not df_curr.empty else avg_p
         except Exception:
             curr_p = avg_p
