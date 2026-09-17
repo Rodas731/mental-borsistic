@@ -242,6 +242,13 @@ def render_single_analysis(ticker):
         # -------------------------------------------------------------------------
         try:
             auto_agent = AutotradingAgent()
+            user_port = get_portfolio()
+            holding = next((p for p in user_port if p['ticker'] == ticker), None) if user_port else None
+            
+            avg_price = holding['avg_purchase_price'] if holding else df['Close'].iloc[-1]
+            shares = holding['shares'] if holding else 100
+            is_in_port = bool(holding)
+
             exit_data_payload = {
                 'market_data': df,
                 'df': df,
@@ -249,9 +256,10 @@ def render_single_analysis(ticker):
                 'sec_res': sec_res,
                 'smart_money_res': smart_money_res,
                 'risk_res': risk_res,
-                'company_info': company_info
+                'company_info': company_info,
+                'is_in_portfolio': is_in_port
             }
-            exit_eval = auto_agent.run_exit_analysis(ticker, current_shares=100, avg_price=df['Close'].iloc[0], data_payload=exit_data_payload)
+            exit_eval = auto_agent.run_exit_analysis(ticker, current_shares=shares, avg_price=avg_price, data_payload=exit_data_payload)
             exit_score = exit_eval.get('exit_score', 0.0)
             exit_rec = exit_eval.get('recommendation', 'MANTIENI')
             
@@ -442,58 +450,232 @@ market_lists = {
 # ---------------------------------------------------------
 if page == "📡 Live Analysis":
     st.title("📈 Motore di Intelligenza di Mercato (Live)")
-    st.markdown("Plancia di comando: Analisi portafoglio, ricerca ad-hoc e scansione opportunità massiva.")
-
-    # 1. Ricerca Ad-Hoc
-    st.header("🔍 Ricerca Ad-Hoc")
-    
-    search_mode = st.radio("Metodo di inserimento:", ["Selezione da Lista (Mercati)", "Inserimento Libero"], horizontal=True)
-    
-    col_search, col_btn, col_clear = st.columns([2, 1, 1])
-    
-    ad_hoc_ticker = ""
-    if search_mode == "Selezione da Lista (Mercati)":
-        with col_search:
-            col_mkt, col_tkr = st.columns(2)
-            with col_mkt:
-                sel_market = st.selectbox("Seleziona Mercato:", list(market_lists.keys()))
-            with col_tkr:
-                ad_hoc_ticker = st.selectbox(
-                    "Seleziona Titolo:", 
-                    market_lists[sel_market],
-                    format_func=lambda x: f"{x} - {TICKER_NAMES.get(x, 'Nome Sconosciuto')}"
-                )
-    else:
-        with col_search:
-            ad_hoc_ticker = st.text_input("Inserisci un Ticker (es. AAPL, ENEL.MI, TSLA):").upper().strip()
-            
-    with col_btn:
-        st.write("")
-        st.write("")
-        search_btn = st.button("Analizza Singolo Titolo")
-        
-    with col_clear:
-        st.write("")
-        st.write("")
-        clear_btn = st.button("Chiudi Ricerca", help="Torna all'analisi del portafoglio")
-
-    if clear_btn:
-        st.session_state['ad_hoc_search'] = None
-        st.rerun()
-
-    if search_btn and ad_hoc_ticker:
-        st.session_state['ad_hoc_search'] = ad_hoc_ticker
+    st.markdown("Plancia di comando: Scansione massiva opportunità, ricerca approfondita e Radar di Uscita.")
 
     portfolio = get_portfolio()
     portfolio_tickers = [p['ticker'] for p in portfolio] if portfolio else []
 
-    if st.session_state.get('ad_hoc_search'):
-        st.subheader(f"Risultati Ricerca: {st.session_state['ad_hoc_search']}")
-        render_single_analysis(st.session_state['ad_hoc_search'])
-        st.markdown("---")
-    else:
-        # 2. Analisi Portafoglio (mostrato solo se non si sta facendo una ricerca ad-hoc)
-        st.header("💼 Analisi Portafoglio Attivo")
+    tab_scan, tab_search, tab_portfolio = st.tabs([
+        "🚀 Scansione Mercati (Massiva)", 
+        "🔍 Ricerca Ad-Hoc Singolo Titolo", 
+        "🛡️ Radar di Uscita & Portafoglio"
+    ])
+
+    with tab_scan:
+        st.header("🚀 Scansione Opportunità Massiva")
+        st.markdown("Seleziona la piazza finanziaria da scansionare per trovare le migliori occasioni di acquisto in tempo reale.")
+        
+        col_mi, col_ny, col_pa, col_fr = st.columns(4)
+        with col_mi:
+            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi")
+        with col_ny:
+            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny")
+        with col_pa:
+            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa")
+        with col_fr:
+            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr")
+        
+        market_to_scan = None
+        if scan_mi:
+            market_to_scan = "Milano"
+        elif scan_ny:
+            market_to_scan = "New York"
+        elif scan_pa:
+            market_to_scan = "Parigi"
+        elif scan_fr:
+            market_to_scan = "Francoforte"
+
+        def render_completed_top_5(current_results, market_name):
+            if not current_results:
+                return
+            sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
+            if not sorted_res:
+                return
+                
+            st.subheader(f"🏆 Tabella Top 5 Titoli con Score Maggiore - {market_name}")
+            table_rows = []
+            for i, r in enumerate(sorted_res):
+                c_name = TICKER_NAMES.get(r['ticker'], '')
+                table_rows.append({
+                    'Posizione': f"#{i+1}",
+                    'Ticker': r['ticker'],
+                    'Nome Azienda': c_name if c_name else r['ticker'],
+                    'Segnale AI': f"{r['final_signal']:+.2f}",
+                    'Previsione': r['prediction'],
+                    'Confidenza': f"{r['confidence']:.0%}",
+                    'Rischio': r.get('risk_level', 'SCONOSCIUTO'),
+                    'Tecnico': f"{r.get('price_sig', 0.0):+.2f}" if r.get('price_sig') is not None else "-",
+                    'Sentiment': f"{r.get('news_sig', 0.0):+.2f}" if r.get('news_sig') is not None else "-",
+                    'Fondamentali': f"{r.get('sec_sig', 0.0):+.2f}" if r.get('sec_sig') is not None else "-",
+                    'Smart Money': f"{r.get('smart_sig', 0.0):+.2f}" if r.get('smart_sig') is not None else "-"
+                })
+            st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+            
+            st.markdown("#### 🔍 Schede Dettagliate Top 5")
+            for i, r in enumerate(sorted_res):
+                c_name = TICKER_NAMES.get(r['ticker'], '')
+                title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
+                with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
+                    def fmt_sig(val):
+                        return f"{val:+.2f}" if val is not None else "N/A"
+                        
+                    sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
+                    risk_level = r.get('risk_level', 'SCONOSCIUTO')
+                    
+                    html_content = f"""
+                    <div style="text-align: center; margin-bottom: 10px;">
+                        <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
+                        <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
+                    </div>
+                    <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
+                        <i>"{r['prediction']}"</i>
+                    </div>
+                    <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
+                        <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
+                        <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
+                        <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
+                        <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
+                    </div>
+                    """
+                    st.markdown(html_content, unsafe_allow_html=True)
+
+        if market_to_scan:
+            all_candidates = market_lists[market_to_scan]
+            candidates = [t for t in all_candidates if t not in portfolio_tickers]
+            
+            st.info(f"Inizio scansione rapida di {len(candidates)} titoli per la piazza di {market_to_scan}...")
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            results = []
+            
+            price_agent = PriceAgent()
+            news_agent = NewsAgent()
+            sec_agent = SECAgent()
+            smart_money_agent = SmartMoneyAgent()
+            risk_agent = RiskAgent()
+            macro_agent = MacroAgent()
+            fusion_engine = SignalFusionEngine()
+            data_client = MarketDataClient()
+
+            status_text.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli ({market_to_scan})...")
+            batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+            
+            macro_df = data_client.get_historical_prices("SPY", period="3mo")
+            macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
+            macro_res_global = macro_agent.analyze(data=macro_payload)
+            macro_res_global['agent_name'] = macro_agent.name
+
+            for idx, ticker in enumerate(candidates):
+                if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
+                    progress_bar.progress((idx + 1) / len(candidates))
+                    tk_label = TICKER_NAMES.get(ticker, ticker)
+                    status_text.text(f"Analisi IA in corso... ({idx+1}/{len(candidates)} titoli completati)")
+                try:
+                    df = batch_data.get(ticker, pd.DataFrame())
+                    if df is not None and not df.empty:
+                        data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
+                        
+                        price_res = price_agent.analyze(ticker, data_payload)
+                        price_res['agent_name'] = price_agent.name
+                        
+                        news_res = news_agent.analyze(ticker, data_payload)
+                        news_res['agent_name'] = news_agent.name
+                        
+                        sec_res = sec_agent.analyze(ticker, data_payload)
+                        sec_res['agent_name'] = sec_agent.name
+                        
+                        smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+                        smart_money_res['agent_name'] = smart_money_agent.name
+                        
+                        risk_res = risk_agent.analyze(ticker, data_payload)
+                        risk_res['agent_name'] = risk_agent.name
+                        
+                        macro_res = macro_res_global
+                        
+                        res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res])
+                        
+                        results.append({
+                            'ticker': ticker,
+                            'final_signal': res_fusion['final_signal'],
+                            'confidence': res_fusion['confidence'],
+                            'prediction': res_fusion['prediction'],
+                            'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                            'price_sig': price_res.get('signal'),
+                            'news_sig': news_res.get('signal'),
+                            'sec_sig': sec_res.get('signal'),
+                            'smart_sig': smart_money_res.get('signal')
+                        })
+                        
+                        try:
+                            save_signal(
+                                ticker=ticker, 
+                                prediction=res_fusion['prediction'], 
+                                final_signal=res_fusion['final_signal'], 
+                                confidence=res_fusion['confidence'], 
+                                risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
+                                raw_data=res_fusion
+                            )
+                        except Exception as ex_db:
+                            pass
+                except Exception as e:
+                    logger.error(f"Error analyzing {ticker}: {e}")
+                
+            progress_bar.empty()
+            status_text.success(f"✅ Scansione completata con successo! ({len(results)} titoli analizzati)")
+            st.session_state['live_scan_results'] = results
+            st.session_state['live_scan_market'] = market_to_scan
+            render_completed_top_5(results, market_to_scan)
+        elif st.session_state.get('live_scan_results'):
+            st.markdown("---")
+            render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
+
+    with tab_search:
+        st.header("🔍 Ricerca e Analisi Singolo Titolo")
+        search_mode = st.radio("Metodo di inserimento:", ["Selezione da Lista (Mercati)", "Inserimento Libero"], horizontal=True, key="search_mode_radio")
+        
+        col_search, col_btn, col_clear = st.columns([2, 1, 1])
+        ad_hoc_ticker = ""
+        if search_mode == "Selezione da Lista (Mercati)":
+            with col_search:
+                col_mkt, col_tkr = st.columns(2)
+                with col_mkt:
+                    sel_market = st.selectbox("Seleziona Mercato:", list(market_lists.keys()), key="search_sel_market")
+                with col_tkr:
+                    ad_hoc_ticker = st.selectbox(
+                        "Seleziona Titolo:", 
+                        market_lists[sel_market],
+                        format_func=lambda x: f"{x} - {TICKER_NAMES.get(x, 'Nome Sconosciuto')}",
+                        key="search_sel_ticker"
+                    )
+        else:
+            with col_search:
+                ad_hoc_ticker = st.text_input("Inserisci un Ticker (es. AAPL, ENEL.MI, TSLA):", key="search_text_input").upper().strip()
+                
+        with col_btn:
+            st.write("")
+            st.write("")
+            search_btn = st.button("Analizza Singolo Titolo", key="btn_single_search")
+            
+        with col_clear:
+            st.write("")
+            st.write("")
+            clear_btn = st.button("Chiudi Ricerca", key="btn_single_clear")
+
+        if clear_btn:
+            st.session_state['ad_hoc_search'] = None
+            st.rerun()
+
+        if search_btn and ad_hoc_ticker:
+            st.session_state['ad_hoc_search'] = ad_hoc_ticker
+
+        if st.session_state.get('ad_hoc_search'):
+            st.subheader(f"Risultati Ricerca: {st.session_state['ad_hoc_search']}")
+            render_single_analysis(st.session_state['ad_hoc_search'])
+
+    with tab_portfolio:
+        st.header("🛡️ Radar di Uscita & Monitoraggio Portafoglio")
+        st.markdown("Valutazione continua della salute dei titoli in portafoglio, determinazione alert di vendita, take profit e trailing stop.")
         
         if portfolio_tickers:
             data_client = MarketDataClient()
@@ -502,185 +684,12 @@ if page == "📡 Live Analysis":
                 c_name = data_client.get_company_info(t).get('shortName', '')
                 tab_names.append(f"{t} ({c_name})" if c_name else t)
                 
-            tabs = st.tabs(tab_names)
+            p_tabs = st.tabs(tab_names)
             for idx, ticker in enumerate(portfolio_tickers):
-                with tabs[idx]:
+                with p_tabs[idx]:
                     render_single_analysis(ticker)
         else:
-            st.info("Nessun titolo in portafoglio. Cerca un titolo o avvia la scansione opportunità.")
-    
-        st.markdown("---")
-
-    # 3. Scansione Opportunità Massiva
-    st.header("🚀 Scansione Opportunità Massiva")
-    st.markdown("Seleziona la piazza finanziaria da scansionare per trovare le migliori occasioni di acquisto in tempo reale.")
-    
-    col_mi, col_ny, col_pa, col_fr = st.columns(4)
-    with col_mi:
-        scan_mi = st.button("🇮🇹 Scansiona Milano")
-    with col_ny:
-        scan_ny = st.button("🇺🇸 Scansiona New York")
-    with col_pa:
-        scan_pa = st.button("🇫🇷 Scansiona Parigi")
-    with col_fr:
-        scan_fr = st.button("🇩🇪 Scansiona Francoforte")
-    
-    market_to_scan = None
-    if scan_mi:
-        market_to_scan = "Milano"
-    elif scan_ny:
-        market_to_scan = "New York"
-    elif scan_pa:
-        market_to_scan = "Parigi"
-    elif scan_fr:
-        market_to_scan = "Francoforte"
-
-    def render_completed_top_5(current_results, market_name):
-        if not current_results:
-            return
-        sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
-        if not sorted_res:
-            return
-            
-        st.subheader(f"🏆 Tabella Top 5 Titoli con Score Maggiore - {market_name}")
-        table_rows = []
-        for i, r in enumerate(sorted_res):
-            c_name = TICKER_NAMES.get(r['ticker'], '')
-            table_rows.append({
-                'Posizione': f"#{i+1}",
-                'Ticker': r['ticker'],
-                'Nome Azienda': c_name if c_name else r['ticker'],
-                'Segnale AI': f"{r['final_signal']:+.2f}",
-                'Previsione': r['prediction'],
-                'Confidenza': f"{r['confidence']:.0%}",
-                'Rischio': r.get('risk_level', 'SCONOSCIUTO'),
-                'Tecnico': f"{r.get('price_sig', 0.0):+.2f}" if r.get('price_sig') is not None else "-",
-                'Sentiment': f"{r.get('news_sig', 0.0):+.2f}" if r.get('news_sig') is not None else "-",
-                'Fondamentali': f"{r.get('sec_sig', 0.0):+.2f}" if r.get('sec_sig') is not None else "-",
-                'Smart Money': f"{r.get('smart_sig', 0.0):+.2f}" if r.get('smart_sig') is not None else "-"
-            })
-        st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
-        
-        st.markdown("#### 🔍 Schede Dettagliate Top 5")
-        for i, r in enumerate(sorted_res):
-            c_name = TICKER_NAMES.get(r['ticker'], '')
-            title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
-            with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
-                def fmt_sig(val):
-                    return f"{val:+.2f}" if val is not None else "N/A"
-                    
-                sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
-                risk_level = r.get('risk_level', 'SCONOSCIUTO')
-                
-                html_content = f"""
-                <div style="text-align: center; margin-bottom: 10px;">
-                    <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
-                    <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
-                </div>
-                <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
-                    <i>"{r['prediction']}"</i>
-                </div>
-                <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
-                    <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
-                    <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
-                    <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
-                    <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
-                </div>
-                """
-                st.markdown(html_content, unsafe_allow_html=True)
-
-    if market_to_scan:
-        all_candidates = market_lists[market_to_scan]
-        candidates = [t for t in all_candidates if t not in portfolio_tickers]
-        
-        st.info(f"Inizio scansione rapida di {len(candidates)} titoli per la piazza di {market_to_scan}...")
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        results = []
-        
-        price_agent = PriceAgent()
-        news_agent = NewsAgent()
-        sec_agent = SECAgent()
-        smart_money_agent = SmartMoneyAgent()
-        risk_agent = RiskAgent()
-        macro_agent = MacroAgent()
-        fusion_engine = SignalFusionEngine()
-        data_client = MarketDataClient()
-
-        # 1. BATCH DOWNLOAD: Scarica tutti i prezzi in un'unica richiesta HTTP
-        status_text.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli ({market_to_scan})...")
-        batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
-        
-        # 2. Pre-calcolo Macro trend (SPY) una sola volta per l'intera scansione
-        macro_df = data_client.get_historical_prices("SPY", period="3mo")
-        macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
-        macro_res_global = macro_agent.analyze(data=macro_payload)
-        macro_res_global['agent_name'] = macro_agent.name
-
-        for idx, ticker in enumerate(candidates):
-            if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
-                progress_bar.progress((idx + 1) / len(candidates))
-                tk_label = TICKER_NAMES.get(ticker, ticker)
-                status_text.text(f"Analisi IA in corso... ({idx+1}/{len(candidates)} titoli completati)")
-            try:
-                df = batch_data.get(ticker, pd.DataFrame())
-                if df is not None and not df.empty:
-                    data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
-                    
-                    price_res = price_agent.analyze(ticker, data_payload)
-                    price_res['agent_name'] = price_agent.name
-                    
-                    news_res = news_agent.analyze(ticker, data_payload)
-                    news_res['agent_name'] = news_agent.name
-                    
-                    sec_res = sec_agent.analyze(ticker, data_payload)
-                    sec_res['agent_name'] = sec_agent.name
-                    
-                    smart_money_res = smart_money_agent.analyze(ticker, data_payload)
-                    smart_money_res['agent_name'] = smart_money_agent.name
-                    
-                    risk_res = risk_agent.analyze(ticker, data_payload)
-                    risk_res['agent_name'] = risk_agent.name
-                    
-                    macro_res = macro_res_global
-                    
-                    res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res])
-                    
-                    results.append({
-                        'ticker': ticker,
-                        'final_signal': res_fusion['final_signal'],
-                        'confidence': res_fusion['confidence'],
-                        'prediction': res_fusion['prediction'],
-                        'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
-                        'price_sig': price_res.get('signal'),
-                        'news_sig': news_res.get('signal'),
-                        'sec_sig': sec_res.get('signal'),
-                        'smart_sig': smart_money_res.get('signal')
-                    })
-                    
-                    try:
-                        save_signal(
-                            ticker=ticker, 
-                            prediction=res_fusion['prediction'], 
-                            final_signal=res_fusion['final_signal'], 
-                            confidence=res_fusion['confidence'], 
-                            risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
-                            raw_data=res_fusion
-                        )
-                    except Exception as ex_db:
-                        pass
-            except Exception as e:
-                logger.error(f"Error analyzing {ticker}: {e}")
-            
-        progress_bar.empty()
-        status_text.success(f"✅ Scansione completata con successo! ({len(results)} titoli analizzati)")
-        st.session_state['live_scan_results'] = results
-        st.session_state['live_scan_market'] = market_to_scan
-        render_completed_top_5(results, market_to_scan)
-    elif st.session_state.get('live_scan_results'):
-        st.markdown("---")
-        render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
+            st.info("Nessun titolo attualmente in portafoglio. Acquista titoli dal simulatore Paper Trading o dall'AI Autotrading per monitorarli qui.")
 
 # ---------------------------------------------------------
 # PAGE 2: 🔎 Screener IA

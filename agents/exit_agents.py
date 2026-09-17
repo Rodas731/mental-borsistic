@@ -81,12 +81,13 @@ class ExitTechnicalAgent(BaseAgent):
             exit_val += 0.4
             reasons.append(f"Flessione del {abs(drawdown_from_high):.1%} dal picco massimo di €{highest_price:.2f}.")
 
-        # 2. Stop Loss & Take Profit predefiniti
-        if pl_pct <= -0.08:
+        # 2. Stop Loss & Take Profit predefiniti (applicati solo a posizioni aperte in portafoglio)
+        is_in_portfolio = data.get('is_in_portfolio', True)
+        if is_in_portfolio and pl_pct <= -0.08:
             exit_val += 0.9
             reasons.append(f"STOP LOSS di sicurezza attivato (P&L: {pl_pct:.1%}).")
             confidence = 0.95
-        elif pl_pct >= 0.20:
+        elif is_in_portfolio and pl_pct >= 0.20:
             exit_val += 0.6
             reasons.append(f"TAKE PROFIT raggiunto per forte guadagno accumulato (P&L: +{pl_pct:.1%}). Consigliato incasso parziale o totale.")
 
