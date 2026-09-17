@@ -467,13 +467,13 @@ if page == "📡 Live Analysis":
         
         col_mi, col_ny, col_pa, col_fr = st.columns(4)
         with col_mi:
-            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi")
+            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi", width="stretch")
         with col_ny:
-            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny")
+            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny", width="stretch")
         with col_pa:
-            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa")
+            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa", width="stretch")
         with col_fr:
-            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr")
+            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr", width="stretch")
         
         market_to_scan = None
         if scan_mi:
@@ -543,22 +543,25 @@ if page == "📡 Live Analysis":
             all_candidates = market_lists[market_to_scan]
             candidates = [t for t in all_candidates if t not in portfolio_tickers]
             
-            with st.spinner(f"Scaricamento pacchetto e analisi IA di {len(candidates)} titoli per {market_to_scan}..."):
+            with st.status(f"🚀 Scansione {market_to_scan} ({len(candidates)} titoli)...", expanded=True) as status:
+                st.write(f"📥 1/3 - Scaricamento quotazioni aggregate per {len(candidates)} titoli...")
+                data_client = MarketDataClient()
+                batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+                
+                st.write("📊 2/3 - Analisi trend macroeconomico globale (SPY)...")
+                macro_agent = MacroAgent()
+                macro_df = data_client.get_historical_prices("SPY", period="3mo")
+                macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
+                macro_res_global = macro_agent.analyze(data=macro_payload)
+                macro_res_global['agent_name'] = macro_agent.name
+
+                st.write("🧠 3/3 - Esecuzione agenti AI (Tecnico, Sentiment, Fondamentali, Smart Money, Rischio)...")
                 price_agent = PriceAgent()
                 news_agent = NewsAgent()
                 sec_agent = SECAgent()
                 smart_money_agent = SmartMoneyAgent()
                 risk_agent = RiskAgent()
-                macro_agent = MacroAgent()
                 fusion_engine = SignalFusionEngine()
-                data_client = MarketDataClient()
-
-                batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
-                
-                macro_df = data_client.get_historical_prices("SPY", period="3mo")
-                macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
-                macro_res_global = macro_agent.analyze(data=macro_payload)
-                macro_res_global['agent_name'] = macro_agent.name
 
                 results = []
                 for ticker in candidates:
@@ -605,18 +608,24 @@ if page == "📡 Live Analysis":
                                     risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
                                     raw_data=res_fusion
                                 )
-                            except Exception as ex_db:
+                            except Exception:
                                 pass
                     except Exception as e:
                         logger.error(f"Error analyzing {ticker}: {e}")
                 
                 st.session_state['live_scan_results'] = results
                 st.session_state['live_scan_market'] = market_to_scan
-                st.success(f"✅ Scansione completata per {market_to_scan}: analizzati con successo {len(results)} titoli!")
+                
+                if results:
+                    status.update(label=f"✅ Scansione completata per {market_to_scan}: analizzati {len(results)}/{len(candidates)} titoli!", state="complete", expanded=False)
+                else:
+                    status.update(label=f"⚠️ Nessun dato disponibile al momento per {market_to_scan}.", state="error", expanded=True)
 
         if st.session_state.get('live_scan_results'):
             st.markdown("---")
             render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
+        else:
+            st.info("👉 Clicca su uno dei 4 pulsanti in alto per scansionare il mercato e visualizzare la Top 5 dei titoli raccomandati.")
 
     with tab_search:
         st.header("🔍 Ricerca e Analisi Singolo Titolo")
@@ -666,16 +675,15 @@ if page == "📡 Live Analysis":
         st.markdown("Valutazione continua della salute dei titoli in portafoglio, determinazione alert di vendita, take profit e trailing stop.")
         
         if portfolio_tickers:
-            data_client = MarketDataClient()
-            tab_names = []
-            for t in portfolio_tickers:
-                c_name = data_client.get_company_info(t).get('shortName', '')
-                tab_names.append(f"{t} ({c_name})" if c_name else t)
-                
-            p_tabs = st.tabs(tab_names)
-            for idx, ticker in enumerate(portfolio_tickers):
-                with p_tabs[idx]:
-                    render_single_analysis(ticker)
+            st.info(f"💼 Titoli monitorati in portafoglio ({len(portfolio_tickers)}): {', '.join(portfolio_tickers)}")
+            sel_p_ticker = st.selectbox(
+                "Seleziona un titolo dal tuo portafoglio per visualizzare la scheda completa ed il Radar di Uscita:", 
+                portfolio_tickers, 
+                format_func=lambda x: f"{x} - {TICKER_NAMES.get(x, '')}",
+                key="portfolio_tab_ticker_select"
+            )
+            if sel_p_ticker:
+                render_single_analysis(sel_p_ticker)
         else:
             st.info("Nessun titolo attualmente in portafoglio. Acquista titoli dal simulatore Paper Trading o dall'AI Autotrading per monitorarli qui.")
 

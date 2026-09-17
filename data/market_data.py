@@ -30,7 +30,7 @@ def _fetch_batch_historical_prices_cached(tickers: tuple, period: str = "6mo", i
         return {}
     
     tickers_list = list(tickers)
-    logger.info(f"Executing single batch download for {len(tickers_list)} tickers (period={period})...")
+    logger.info(f"Executing batch download for {len(tickers_list)} tickers (period={period})...")
     
     try:
         data = yf.download(
@@ -40,45 +40,42 @@ def _fetch_batch_historical_prices_cached(tickers: tuple, period: str = "6mo", i
             group_by='ticker',
             auto_adjust=True,
             threads=True,
-            progress=False
+            progress=False,
+            timeout=20
         )
         
         result = {}
-        if data is None or data.empty:
-            logger.warning("Batch download returned an empty dataset from Yahoo Finance.")
-            return result
-
-        if len(tickers_list) == 1:
-            t = tickers_list[0]
-            clean_df = data.dropna(how='all')
-            if not clean_df.empty:
-                result[t] = clean_df
-        else:
-            for t in tickers_list:
-                try:
-                    df_t = None
-                    if isinstance(data.columns, pd.MultiIndex):
-                        # MultiIndex can have Ticker as level 0 or level 1
-                        if 'Ticker' in data.columns.names:
-                            lvl = data.columns.names.index('Ticker')
-                            if t in data.columns.get_level_values(lvl):
-                                df_t = data.xs(t, level=lvl, axis=1)
-                        else:
-                            if t in data.columns.get_level_values(0):
-                                df_t = data[t]
-                            elif t in data.columns.get_level_values(1):
-                                df_t = data.xs(t, level=1, axis=1)
-                    elif t in data:
-                        df_t = data[t]
-                    
-                    if df_t is not None and not df_t.empty:
-                        clean_t = df_t.dropna(how='all')
-                        if not clean_t.empty:
-                            result[t] = clean_t
-                except Exception as ex:
-                    logger.debug(f"Could not extract sub-dataframe for {t}: {ex}")
-                    
-        logger.info(f"Batch download successful: {len(result)}/{len(tickers_list)} tickers populated.")
+        if data is not None and not data.empty:
+            if len(tickers_list) == 1:
+                t = tickers_list[0]
+                clean_df = data.dropna(how='all')
+                if not clean_df.empty:
+                    result[t] = clean_df
+            else:
+                for t in tickers_list:
+                    try:
+                        df_t = None
+                        if isinstance(data.columns, pd.MultiIndex):
+                            if 'Ticker' in data.columns.names:
+                                lvl = data.columns.names.index('Ticker')
+                                if t in data.columns.get_level_values(lvl):
+                                    df_t = data.xs(t, level=lvl, axis=1)
+                            else:
+                                if t in data.columns.get_level_values(0):
+                                    df_t = data[t]
+                                elif t in data.columns.get_level_values(1):
+                                    df_t = data.xs(t, level=1, axis=1)
+                        elif t in data:
+                            df_t = data[t]
+                        
+                        if df_t is not None and not df_t.empty:
+                            clean_t = df_t.dropna(how='all')
+                            if not clean_t.empty and len(clean_t) >= 5:
+                                result[t] = clean_t
+                    except Exception as ex:
+                        logger.debug(f"Could not extract sub-dataframe for {t}: {ex}")
+                        
+        logger.info(f"Batch download complete: {len(result)}/{len(tickers_list)} tickers loaded.")
         return result
     except Exception as e:
         logger.error(f"Error in batch download from Yahoo Finance: {e}")
