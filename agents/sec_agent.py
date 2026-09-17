@@ -47,6 +47,15 @@ class SECAgent(BaseAgent):
                 "metadata": {}
             }
         
+        # Fast path for massive batch scanning
+        if data and data.get("is_batch"):
+            return {
+                "signal": 0.0,
+                "confidence": 0.5,
+                "reasoning": "Dati fondamentali di base (modalità scansione rapida).",
+                "metadata": {}
+            }
+        
         cik = self._get_cik(ticker)
         if not cik:
             return {"signal": 0.0, "confidence": 0.0, "reasoning": "Non è stato possibile trovare il codice CIK per la SEC. (Probabilmente non è un'azienda USA)."}

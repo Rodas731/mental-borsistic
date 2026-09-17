@@ -24,6 +24,15 @@ class NewsAgent(BaseAgent):
     def analyze(self, ticker: str, data: dict = None) -> dict:
         logger.info(f"[{self.name}] Analyzing {ticker}...")
         
+        # Fast path for massive batch scanning (prevents 100 individual web-scraping calls and rate limits on Streamlit Cloud)
+        if data and data.get("is_batch"):
+            return {
+                "signal": 0.0,
+                "confidence": 0.5,
+                "reasoning": "Sentiment di base neutrale (modalità scansione rapida).",
+                "metadata": {"num_articles": 0, "raw_sentiment": 0.0, "articles": []}
+            }
+        
         try:
             news = _fetch_news_cached(ticker)
             
