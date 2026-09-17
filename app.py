@@ -619,8 +619,10 @@ if page == "📡 Live Analysis":
         macro_res_global['agent_name'] = macro_agent.name
 
         for idx, ticker in enumerate(candidates):
-            tk_label = TICKER_NAMES.get(ticker, ticker)
-            status_text.text(f"Analisi IA ({idx+1}/{len(candidates)}): {ticker} ({tk_label})...")
+            if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
+                progress_bar.progress((idx + 1) / len(candidates))
+                tk_label = TICKER_NAMES.get(ticker, ticker)
+                status_text.text(f"Analisi IA in corso... ({idx+1}/{len(candidates)} titoli completati)")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
                 if df is not None and not df.empty:
@@ -670,8 +672,6 @@ if page == "📡 Live Analysis":
                         pass
             except Exception as e:
                 logger.error(f"Error analyzing {ticker}: {e}")
-                
-            progress_bar.progress((idx + 1) / len(candidates))
             
         progress_bar.empty()
         status_text.success(f"✅ Scansione completata con successo! ({len(results)} titoli analizzati)")
@@ -736,8 +736,10 @@ elif page == "🔎 Screener IA":
         batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
 
         for idx, ticker in enumerate(candidates):
-            tk_name = TICKER_NAMES.get(ticker, ticker)
-            status_scr.text(f"Analisi Screener ({idx+1}/{len(candidates)}): {ticker} ({tk_name})...")
+            if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
+                bar.progress((idx + 1) / len(candidates))
+                tk_name = TICKER_NAMES.get(ticker, ticker)
+                status_scr.text(f"Analisi Screener in corso... ({idx+1}/{len(candidates)} titoli completati)")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
                 if df is not None and not df.empty:
@@ -766,7 +768,6 @@ elif page == "🔎 Screener IA":
                         })
             except Exception as e:
                 logger.error(f"Error in screener for {ticker}: {e}")
-            bar.progress((idx + 1) / len(candidates))
             
         bar.empty()
         status_scr.success(f"✅ Screener completato con successo! ({len(results)} titoli sopra soglia)")
