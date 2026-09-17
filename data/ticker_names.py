@@ -31,6 +31,7 @@ TICKER_NAMES = {
     "SPM.MI": "Saipem S.p.A.",
     "STLAM.MI": "Stellantis N.V.",
     "STM.MI": "STMicroelectronics N.V.",
+    "STMMI.MI": "STMicroelectronics N.V.",
     "TEN.MI": "Tenaris S.A.",
     "TRN.MI": "Terna - Rete Elettrica Nazionale Società per Azioni",
     "TIT.MI": "Telecom Italia S.p.A.",

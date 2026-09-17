@@ -386,51 +386,30 @@ page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Scr
 market_lists = {
     "Milano": [
         "A2A.MI", "AMP.MI", "AZM.MI", "BPE.MI", "BMED.MI", "BAMI.MI", "BZU.MI", "CPR.MI", 
-        "CNHI.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "RACE.MI", "F.MI", 
-        "G.MI", "HER.MI", "INW.MI", "ISP.MI", "IG.MI", "LDO.MI", "MB.MI", "MONC.MI", 
-        "NEXI.MI", "PST.MI", "PRY.MI", "REC.MI", "SRG.MI", "SPM.MI", "STLAM.MI", "STM.MI", 
-        "TEN.MI", "TRN.MI", "TIT.MI", "UCG.MI", "UNI.MI", "IP.MI",
-        "BRE.MI", "TGYM.MI", "FCT.MI", "PIA.MI", "SFER.MI", "TOD.MI", "SIT.MI",
-        "MFEB.MI", "OVS.MI", "SESA.MI", "TIS.MI", "WBD.MI", "DOV.MI", "JUVE.MI", "ASR.MI",
-        "LSS.MI", "MARR.MI", "MA.MI", "RENO.MI", "ENAV.MI", "BFF.MI", "MFEA.MI", "ZIGN.MI",
-        "GVS.MI", "ARGO.MI", "SAB.MI", "LUIS.MI", "PHIN.MI", "SIA.MI", "TIN.MI", "SAL.MI",
-        "BIES.MI", "CEM.MI", "DAN.MI", "DAT.MI", "DIB.MI", "EDN.MI", "EUK.MI", "FID.MI",
-        "FNC.MI", "GEO.MI", "IGD.MI", "IMA.MI", "IREN.MI", "ITM.MI", "LIT.MI", "MTV.MI",
-        "MND.MI", "PRT.MI", "RCS.MI", "RET.MI", "SFI.MI", "TAS.MI", "TXT.MI", "VLA.MI", "ZUC.MI"
+        "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "RACE.MI", "G.MI", "HER.MI", 
+        "INW.MI", "ISP.MI", "IG.MI", "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PST.MI", 
+        "PRY.MI", "REC.MI", "SRG.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TEN.MI", "TRN.MI", 
+        "TIT.MI", "UCG.MI", "UNI.MI", "IP.MI", "BRE.MI", "TGYM.MI", "FCT.MI", "OVS.MI"
     ],
     "New York": [
         "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B", "UNH", "JNJ",
         "JPM", "V", "PG", "XOM", "HD", "CVX", "MA", "ABBV", "MRK", "PEP",
         "COST", "AVGO", "KO", "TMO", "CSCO", "MCD", "CRM", "ABT", "DHR", "ACN",
-        "NFLX", "AMD", "INTC", "QCOM", "TXN", "SLB", "COP", "EOG", "PXD", "MPC",
-        "GOOG", "WMT", "NKE", "DIS", "BA", "IBM", "ORCL", "AMAT", "MU", "LRCX",
-        "ADI", "KLAC", "NXPI", "MRVL", "MCHP", "SWKS", "TER", "QRVO", "WDC", "STX",
-        "HPQ", "HPE", "DELL", "NTAP", "ANET", "JNPR", "GLW", "MSI", "ZBRA", "TRMB",
-        "KEYS", "TDY", "IT", "CDW", "EPAM", "CTSH", "AKAM", "FTNT", "PANW", "CRWD",
-        "ZS", "OKTA", "NET", "FSLY", "DDOG", "SNOW", "PLTR", "U", "RBLX", "PATH",
-        "MNDY", "ASAN", "SMAR", "DOCN", "FIVN", "TENB", "VRNS", "CHKP"
+        "NFLX", "AMD", "INTC", "QCOM", "TXN", "SLB", "COP", "EOG", "WMT", "DIS"
     ],
     "Parigi": [
         "MC.PA", "OR.PA", "RMS.PA", "TTE.PA", "SAN.PA", "AIR.PA", "SU.PA", "AI.PA",
         "BNP.PA", "EL.PA", "CS.PA", "DG.PA", "SAF.PA", "BN.PA", "SGO.PA", "CAP.PA",
         "ACA.PA", "GLE.PA", "LR.PA", "EN.PA", "VIE.PA", "ENGI.PA", "ORA.PA", "RNO.PA",
         "ML.PA", "RI.PA", "KER.PA", "VIV.PA", "PUB.PA", "EDEN.PA", "HO.PA", "URW.PA",
-        "CA.PA", "WLN.PA", "ERF.PA", "DSY.PA", "AC.PA", "ALO.PA", "FGA.PA", "AMUN.PA",
-        "BVI.PA", "GET.PA", "SPIE.PA", "SOI.PA", "VK.PA", "ATE.PA", "SK.PA", "DEC.PA",
-        "GFC.PA", "ICAD.PA", "NEX.PA", "RCO.PA", "TE.PA", "VIRP.PA", "ELIS.PA", "BEN.PA",
-        "COFA.PA", "DIM.PA", "GTT.PA", "NK.PA", "VANTI.PA", "NXI.PA", "ATO.PA", "IPN.PA",
-        "TFI.PA", "MT.AS", "STLAP.PA", "CARM.PA", "UBI.PA", "DBV.PA", "NRO.PA"
+        "CA.PA", "WLN.PA", "ERF.PA", "DSY.PA", "AC.PA", "ALO.PA", "SPIE.PA", "GET.PA"
     ],
     "Francoforte": [
         "SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "VOW3.DE", "MBG.DE", "BMW.DE", "BAS.DE",
         "MUV2.DE", "IFX.DE", "BAYN.DE", "DHL.DE", "MRK.DE", "HEN3.DE", "EOAN.DE", "BEI.DE",
         "DBK.DE", "RWE.DE", "VNA.DE", "ADS.DE", "DTG.DE", "FRE.DE", "FME.DE", "HEI.DE",
         "HNR1.DE", "CON.DE", "MTX.DE", "PAH3.DE", "P911.DE", "QIA.DE", "RHM.DE", "SHL.DE",
-        "SY1.DE", "ZAL.DE", "CBK.DE", "ENR.DE", "SRT3.DE", "BNR.DE", "EVK.DE", "KRN.DE",
-        "LEG.DE", "G1A.DE", "FRA.DE", "HFG.DE", "PUM.DE", "LHA.DE", "TLX.DE", "AIXA.DE",
-        "EVD.DE", "FPE3.DE", "GXI.DE", "NEM.DE", "TEG.DE", "WCH.DE", "BOSS.DE", "G24.DE",
-        "TKA.DE", "EVT.DE", "GFT.DE", "SMHN.DE", "SDF.DE", "HLE.DE", "HAG.DE", "DEQ.DE",
-        "DEZ.DE", "KBX.DE", "VOS.DE", "WAC.DE", "DUE.DE", "AMZ.DE"
+        "SY1.DE", "ZAL.DE", "CBK.DE", "ENR.DE", "SRT3.DE", "BNR.DE", "EVK.DE", "KRN.DE"
     ]
 }
 
@@ -656,11 +635,7 @@ if page == "📡 Live Analysis":
             status_text.text(f"Analisi IA {idx+1}/{len(candidates)}: {ticker} ({tk_label})...")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
-                # Fallback singolo se non presente nel batch
-                if df.empty:
-                    df = data_client.get_historical_prices(ticker, period="6mo")
-                    
-                if not df.empty:
+                if df is not None and not df.empty:
                     data_payload = {"market_data": df, "macro_data": macro_df}
                     
                     price_res = price_agent.analyze(ticker, data_payload)
@@ -779,9 +754,7 @@ elif page == "🔎 Screener IA":
             status_scr.text(f"Analisi Screener {idx+1}/{len(candidates)}: {ticker} ({tk_name})...")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
-                if df.empty:
-                    df = data_client.get_historical_prices(ticker, period="3mo")
-                if not df.empty:
+                if df is not None and not df.empty:
                     data_payload = {"market_data": df}
                     p_res = p_agent.analyze(ticker, data_payload)
                     p_res['agent_name'] = p_agent.name
