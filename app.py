@@ -474,40 +474,48 @@ if page == "📡 Live Analysis":
             scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa", width="stretch")
         with col_fr:
             scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr", width="stretch")
-        
-        market_to_scan = None
+
+        # Persist the chosen market into session_state so it survives reruns
         if scan_mi:
-            market_to_scan = "Milano"
+            st.session_state['pending_scan'] = "Milano"
         elif scan_ny:
-            market_to_scan = "New York"
+            st.session_state['pending_scan'] = "New York"
         elif scan_pa:
-            market_to_scan = "Parigi"
+            st.session_state['pending_scan'] = "Parigi"
         elif scan_fr:
-            market_to_scan = "Francoforte"
+            st.session_state['pending_scan'] = "Francoforte"
+
+        def fmt_sig(val):
+            """Format signal value - defined outside loops to avoid Python closure bugs."""
+            return f"{val:+.2f}" if val is not None else "N/A"
 
         def render_completed_top_5(current_results, market_name):
             if not current_results:
+                st.warning("Nessun titolo analizzato con successo. Riprova tra qualche minuto.")
                 return
             sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
             if not sorted_res:
+                st.warning("Lista risultati vuota dopo il filtraggio.")
                 return
                 
-            st.subheader(f"🏆 Tabella Top 5 Titoli con Score Maggiore - {market_name}")
+            st.success(f"✅ Scansione completata — {market_name} | {len(current_results)} titoli analizzati")
+            st.subheader(f"🏆 Top 5 Opportunità — {market_name}")
+            
             table_rows = []
             for i, r in enumerate(sorted_res):
                 c_name = TICKER_NAMES.get(r['ticker'], '')
                 table_rows.append({
-                    'Posizione': f"#{i+1}",
+                    '#': f"#{i+1}",
                     'Ticker': r['ticker'],
-                    'Nome Azienda': c_name if c_name else r['ticker'],
+                    'Nome': c_name if c_name else r['ticker'],
                     'Segnale AI': f"{r['final_signal']:+.2f}",
                     'Previsione': r['prediction'],
                     'Confidenza': f"{r['confidence']:.0%}",
-                    'Rischio': r.get('risk_level', 'SCONOSCIUTO'),
-                    'Tecnico': f"{r.get('price_sig', 0.0):+.2f}" if r.get('price_sig') is not None else "-",
-                    'Sentiment': f"{r.get('news_sig', 0.0):+.2f}" if r.get('news_sig') is not None else "-",
-                    'Fondamentali': f"{r.get('sec_sig', 0.0):+.2f}" if r.get('sec_sig') is not None else "-",
-                    'Smart Money': f"{r.get('smart_sig', 0.0):+.2f}" if r.get('smart_sig') is not None else "-"
+                    'Rischio': r.get('risk_level', 'N/D'),
+                    'Tecnico': fmt_sig(r.get('price_sig')),
+                    'Sentiment': fmt_sig(r.get('news_sig')),
+                    'Fondamentali': fmt_sig(r.get('sec_sig')),
+                    'Smart Money': fmt_sig(r.get('smart_sig'))
                 })
             st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
             
@@ -515,115 +523,114 @@ if page == "📡 Live Analysis":
             for i, r in enumerate(sorted_res):
                 c_name = TICKER_NAMES.get(r['ticker'], '')
                 title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
-                with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
-                    def fmt_sig(val):
-                        return f"{val:+.2f}" if val is not None else "N/A"
-                        
-                    sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
-                    risk_level = r.get('risk_level', 'SCONOSCIUTO')
-                    
-                    html_content = f"""
-                    <div style="text-align: center; margin-bottom: 10px;">
-                        <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
-                        <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
+                sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
+                risk_level_val = r.get('risk_level', 'SCONOSCIUTO')
+                price_sig_fmt = fmt_sig(r.get('price_sig'))
+                news_sig_fmt = fmt_sig(r.get('news_sig'))
+                sec_sig_fmt = fmt_sig(r.get('sec_sig'))
+                smart_sig_fmt = fmt_sig(r.get('smart_sig'))
+                final_signal_val = r['final_signal']
+                confidence_val = r['confidence']
+                prediction_val = r['prediction']
+                
+                with st.expander(f"{title_str} | Segnale: {final_signal_val:+.2f} | Conf: {confidence_val:.0%}", expanded=(i==0)):
+                    st.markdown(f"""
+                    <div style="text-align:center; padding:12px; border-radius:8px; background:rgba(128,128,128,0.1); margin-bottom:10px;">
+                        <h2 style="color:{sig_color}; margin:0;">Segnale: {final_signal_val:+.2f}</h2>
+                        <p style="color:gray; margin:4px 0;">Rischio: {risk_level_val} | Confidenza: {confidence_val:.0%}</p>
+                        <i>"{prediction_val}"</i>
                     </div>
-                    <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
-                        <i>"{r['prediction']}"</i>
+                    <div style="display:flex; justify-content:space-around; font-size:0.85rem; padding:8px; background:rgba(128,128,128,0.07); border-radius:5px;">
+                        <div><b>Tecnico:</b> {price_sig_fmt}</div>
+                        <div><b>Sentiment:</b> {news_sig_fmt}</div>
+                        <div><b>Fondamentali:</b> {sec_sig_fmt}</div>
+                        <div><b>Istituzionali:</b> {smart_sig_fmt}</div>
                     </div>
-                    <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
-                        <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
-                        <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
-                        <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
-                        <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
-                    </div>
-                    """
-                    st.markdown(html_content, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-        if market_to_scan:
-            all_candidates = market_lists[market_to_scan]
+        pending_market = st.session_state.get('pending_scan')
+        if pending_market:
+            # Clear the pending trigger immediately so subsequent reruns don't re-scan
+            st.session_state.pop('pending_scan')
+            
+            all_candidates = market_lists[pending_market]
             candidates = [t for t in all_candidates if t not in portfolio_tickers]
             
-            with st.status(f"🚀 Scansione {market_to_scan} ({len(candidates)} titoli)...", expanded=True) as status:
-                st.write(f"📥 1/3 - Scaricamento quotazioni aggregate per {len(candidates)} titoli...")
-                data_client = MarketDataClient()
-                batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
-                
-                st.write("📊 2/3 - Analisi trend macroeconomico globale (SPY)...")
-                macro_agent = MacroAgent()
-                macro_df = data_client.get_historical_prices("SPY", period="3mo")
-                macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
-                macro_res_global = macro_agent.analyze(data=macro_payload)
-                macro_res_global['agent_name'] = macro_agent.name
+            with st.spinner(f"⏳ Scansione {pending_market}: download e analisi AI di {len(candidates)} titoli..."):
+                try:
+                    data_client = MarketDataClient()
+                    batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+                    
+                    macro_agent = MacroAgent()
+                    macro_df = data_client.get_historical_prices("SPY", period="3mo")
+                    macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
+                    macro_res_global = macro_agent.analyze(data=macro_payload)
+                    macro_res_global['agent_name'] = macro_agent.name
 
-                st.write("🧠 3/3 - Esecuzione agenti AI (Tecnico, Sentiment, Fondamentali, Smart Money, Rischio)...")
-                price_agent = PriceAgent()
-                news_agent = NewsAgent()
-                sec_agent = SECAgent()
-                smart_money_agent = SmartMoneyAgent()
-                risk_agent = RiskAgent()
-                fusion_engine = SignalFusionEngine()
+                    price_agent = PriceAgent()
+                    news_agent = NewsAgent()
+                    sec_agent = SECAgent()
+                    smart_money_agent = SmartMoneyAgent()
+                    risk_agent = RiskAgent()
+                    fusion_engine = SignalFusionEngine()
 
-                results = []
-                for ticker in candidates:
-                    try:
-                        df = batch_data.get(ticker, pd.DataFrame())
-                        if df is not None and not df.empty:
-                            data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
-                            
-                            price_res = price_agent.analyze(ticker, data_payload)
-                            price_res['agent_name'] = price_agent.name
-                            
-                            news_res = news_agent.analyze(ticker, data_payload)
-                            news_res['agent_name'] = news_agent.name
-                            
-                            sec_res = sec_agent.analyze(ticker, data_payload)
-                            sec_res['agent_name'] = sec_agent.name
-                            
-                            smart_money_res = smart_money_agent.analyze(ticker, data_payload)
-                            smart_money_res['agent_name'] = smart_money_agent.name
-                            
-                            risk_res = risk_agent.analyze(ticker, data_payload)
-                            risk_res['agent_name'] = risk_agent.name
-                            
-                            res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res_global])
-                            
-                            results.append({
-                                'ticker': ticker,
-                                'final_signal': res_fusion['final_signal'],
-                                'confidence': res_fusion['confidence'],
-                                'prediction': res_fusion['prediction'],
-                                'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
-                                'price_sig': price_res.get('signal'),
-                                'news_sig': news_res.get('signal'),
-                                'sec_sig': sec_res.get('signal'),
-                                'smart_sig': smart_money_res.get('signal')
-                            })
-                            
-                            try:
-                                save_signal(
-                                    ticker=ticker, 
-                                    prediction=res_fusion['prediction'], 
-                                    final_signal=res_fusion['final_signal'], 
-                                    confidence=res_fusion['confidence'], 
-                                    risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
-                                    raw_data=res_fusion
-                                )
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.error(f"Error analyzing {ticker}: {e}")
-                
-                st.session_state['live_scan_results'] = results
-                st.session_state['live_scan_market'] = market_to_scan
-                
-                if results:
-                    status.update(label=f"✅ Scansione completata per {market_to_scan}: analizzati {len(results)}/{len(candidates)} titoli!", state="complete", expanded=False)
-                else:
-                    status.update(label=f"⚠️ Nessun dato disponibile al momento per {market_to_scan}.", state="error", expanded=True)
+                    results = []
+                    for ticker in candidates:
+                        try:
+                            df = batch_data.get(ticker, pd.DataFrame())
+                            if df is not None and not df.empty:
+                                data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
+                                
+                                price_res = price_agent.analyze(ticker, data_payload)
+                                price_res['agent_name'] = price_agent.name
+                                news_res = news_agent.analyze(ticker, data_payload)
+                                news_res['agent_name'] = news_agent.name
+                                sec_res = sec_agent.analyze(ticker, data_payload)
+                                sec_res['agent_name'] = sec_agent.name
+                                smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+                                smart_money_res['agent_name'] = smart_money_agent.name
+                                risk_res = risk_agent.analyze(ticker, data_payload)
+                                risk_res['agent_name'] = risk_agent.name
+                                
+                                res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res_global])
+                                
+                                results.append({
+                                    'ticker': ticker,
+                                    'final_signal': res_fusion['final_signal'],
+                                    'confidence': res_fusion['confidence'],
+                                    'prediction': res_fusion['prediction'],
+                                    'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                                    'price_sig': price_res.get('signal'),
+                                    'news_sig': news_res.get('signal'),
+                                    'sec_sig': sec_res.get('signal'),
+                                    'smart_sig': smart_money_res.get('signal')
+                                })
+                                try:
+                                    save_signal(
+                                        ticker=ticker,
+                                        prediction=res_fusion['prediction'],
+                                        final_signal=res_fusion['final_signal'],
+                                        confidence=res_fusion['confidence'],
+                                        risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                                        raw_data=res_fusion
+                                    )
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.error(f"Error analyzing {ticker}: {e}")
+                    
+                    st.session_state['live_scan_results'] = results
+                    st.session_state['live_scan_market'] = pending_market
+                    
+                except Exception as scan_err:
+                    logger.error(f"Scan top-level error: {scan_err}")
+                    st.error(f"❌ Errore durante la scansione: {scan_err}")
 
         if st.session_state.get('live_scan_results'):
-            st.markdown("---")
-            render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
+            render_completed_top_5(
+                st.session_state['live_scan_results'],
+                st.session_state.get('live_scan_market', 'Ultima Scansione')
+            )
         else:
             st.info("👉 Clicca su uno dei 4 pulsanti in alto per scansionare il mercato e visualizzare la Top 5 dei titoli raccomandati.")
 
