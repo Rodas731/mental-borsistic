@@ -543,90 +543,78 @@ if page == "📡 Live Analysis":
             all_candidates = market_lists[market_to_scan]
             candidates = [t for t in all_candidates if t not in portfolio_tickers]
             
-            st.info(f"Inizio scansione rapida di {len(candidates)} titoli per la piazza di {market_to_scan}...")
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            results = []
-            
-            price_agent = PriceAgent()
-            news_agent = NewsAgent()
-            sec_agent = SECAgent()
-            smart_money_agent = SmartMoneyAgent()
-            risk_agent = RiskAgent()
-            macro_agent = MacroAgent()
-            fusion_engine = SignalFusionEngine()
-            data_client = MarketDataClient()
+            with st.spinner(f"Scaricamento pacchetto e analisi IA di {len(candidates)} titoli per {market_to_scan}..."):
+                price_agent = PriceAgent()
+                news_agent = NewsAgent()
+                sec_agent = SECAgent()
+                smart_money_agent = SmartMoneyAgent()
+                risk_agent = RiskAgent()
+                macro_agent = MacroAgent()
+                fusion_engine = SignalFusionEngine()
+                data_client = MarketDataClient()
 
-            status_text.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli ({market_to_scan})...")
-            batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
-            
-            macro_df = data_client.get_historical_prices("SPY", period="3mo")
-            macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
-            macro_res_global = macro_agent.analyze(data=macro_payload)
-            macro_res_global['agent_name'] = macro_agent.name
-
-            for idx, ticker in enumerate(candidates):
-                if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
-                    progress_bar.progress((idx + 1) / len(candidates))
-                    tk_label = TICKER_NAMES.get(ticker, ticker)
-                    status_text.text(f"Analisi IA in corso... ({idx+1}/{len(candidates)} titoli completati)")
-                try:
-                    df = batch_data.get(ticker, pd.DataFrame())
-                    if df is not None and not df.empty:
-                        data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
-                        
-                        price_res = price_agent.analyze(ticker, data_payload)
-                        price_res['agent_name'] = price_agent.name
-                        
-                        news_res = news_agent.analyze(ticker, data_payload)
-                        news_res['agent_name'] = news_agent.name
-                        
-                        sec_res = sec_agent.analyze(ticker, data_payload)
-                        sec_res['agent_name'] = sec_agent.name
-                        
-                        smart_money_res = smart_money_agent.analyze(ticker, data_payload)
-                        smart_money_res['agent_name'] = smart_money_agent.name
-                        
-                        risk_res = risk_agent.analyze(ticker, data_payload)
-                        risk_res['agent_name'] = risk_agent.name
-                        
-                        macro_res = macro_res_global
-                        
-                        res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res])
-                        
-                        results.append({
-                            'ticker': ticker,
-                            'final_signal': res_fusion['final_signal'],
-                            'confidence': res_fusion['confidence'],
-                            'prediction': res_fusion['prediction'],
-                            'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
-                            'price_sig': price_res.get('signal'),
-                            'news_sig': news_res.get('signal'),
-                            'sec_sig': sec_res.get('signal'),
-                            'smart_sig': smart_money_res.get('signal')
-                        })
-                        
-                        try:
-                            save_signal(
-                                ticker=ticker, 
-                                prediction=res_fusion['prediction'], 
-                                final_signal=res_fusion['final_signal'], 
-                                confidence=res_fusion['confidence'], 
-                                risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
-                                raw_data=res_fusion
-                            )
-                        except Exception as ex_db:
-                            pass
-                except Exception as e:
-                    logger.error(f"Error analyzing {ticker}: {e}")
+                batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
                 
-            progress_bar.empty()
-            status_text.success(f"✅ Scansione completata con successo! ({len(results)} titoli analizzati)")
-            st.session_state['live_scan_results'] = results
-            st.session_state['live_scan_market'] = market_to_scan
-            render_completed_top_5(results, market_to_scan)
-        elif st.session_state.get('live_scan_results'):
+                macro_df = data_client.get_historical_prices("SPY", period="3mo")
+                macro_payload = {"macro_data": macro_df} if not macro_df.empty else {}
+                macro_res_global = macro_agent.analyze(data=macro_payload)
+                macro_res_global['agent_name'] = macro_agent.name
+
+                results = []
+                for ticker in candidates:
+                    try:
+                        df = batch_data.get(ticker, pd.DataFrame())
+                        if df is not None and not df.empty:
+                            data_payload = {"market_data": df, "macro_data": macro_df, "is_batch": True}
+                            
+                            price_res = price_agent.analyze(ticker, data_payload)
+                            price_res['agent_name'] = price_agent.name
+                            
+                            news_res = news_agent.analyze(ticker, data_payload)
+                            news_res['agent_name'] = news_agent.name
+                            
+                            sec_res = sec_agent.analyze(ticker, data_payload)
+                            sec_res['agent_name'] = sec_agent.name
+                            
+                            smart_money_res = smart_money_agent.analyze(ticker, data_payload)
+                            smart_money_res['agent_name'] = smart_money_agent.name
+                            
+                            risk_res = risk_agent.analyze(ticker, data_payload)
+                            risk_res['agent_name'] = risk_agent.name
+                            
+                            res_fusion = fusion_engine.process_signals([price_res, news_res, sec_res, smart_money_res, risk_res, macro_res_global])
+                            
+                            results.append({
+                                'ticker': ticker,
+                                'final_signal': res_fusion['final_signal'],
+                                'confidence': res_fusion['confidence'],
+                                'prediction': res_fusion['prediction'],
+                                'risk_level': res_fusion.get('risk_level', 'SCONOSCIUTO'),
+                                'price_sig': price_res.get('signal'),
+                                'news_sig': news_res.get('signal'),
+                                'sec_sig': sec_res.get('signal'),
+                                'smart_sig': smart_money_res.get('signal')
+                            })
+                            
+                            try:
+                                save_signal(
+                                    ticker=ticker, 
+                                    prediction=res_fusion['prediction'], 
+                                    final_signal=res_fusion['final_signal'], 
+                                    confidence=res_fusion['confidence'], 
+                                    risk_level=res_fusion.get('risk_level', 'SCONOSCIUTO'), 
+                                    raw_data=res_fusion
+                                )
+                            except Exception as ex_db:
+                                pass
+                    except Exception as e:
+                        logger.error(f"Error analyzing {ticker}: {e}")
+                
+                st.session_state['live_scan_results'] = results
+                st.session_state['live_scan_market'] = market_to_scan
+                st.success(f"✅ Scansione completata per {market_to_scan}: analizzati con successo {len(results)} titoli!")
+
+        if st.session_state.get('live_scan_results'):
             st.markdown("---")
             render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
 
@@ -727,61 +715,51 @@ elif page == "🔎 Screener IA":
 
     if st.button("Avvia Screener IA"):
         candidates = market_lists[sel_market_scr]
-        st.info(f"Analisi di {len(candidates)} titoli su {sel_market_scr}...")
-        
-        bar = st.progress(0)
-        status_scr = st.empty()
-        results = []
-        
-        p_agent = PriceAgent()
-        n_agent = NewsAgent()
-        sec_agent = SECAgent()
-        sm_agent = SmartMoneyAgent()
-        r_agent = RiskAgent()
-        fusion = SignalFusionEngine()
-        data_client = MarketDataClient()
-        
-        status_scr.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli...")
-        batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
-
-        for idx, ticker in enumerate(candidates):
-            if (idx + 1) % 10 == 0 or idx == len(candidates) - 1:
-                bar.progress((idx + 1) / len(candidates))
-                tk_name = TICKER_NAMES.get(ticker, ticker)
-                status_scr.text(f"Analisi Screener in corso... ({idx+1}/{len(candidates)} titoli completati)")
-            try:
-                df = batch_data.get(ticker, pd.DataFrame())
-                if df is not None and not df.empty:
-                    data_payload = {"market_data": df, "is_batch": True}
-                    p_res = p_agent.analyze(ticker, data_payload)
-                    p_res['agent_name'] = p_agent.name
-                    n_res = n_agent.analyze(ticker, data_payload)
-                    n_res['agent_name'] = n_agent.name
-                    sec_res = sec_agent.analyze(ticker, data_payload)
-                    sec_res['agent_name'] = sec_agent.name
-                    sm_res = sm_agent.analyze(ticker, data_payload)
-                    sm_res['agent_name'] = sm_agent.name
-                    r_res = r_agent.analyze(ticker, data_payload)
-                    r_res['agent_name'] = r_agent.name
-                    
-                    fusion_res = fusion.process_signals([p_res, n_res, sec_res, sm_res, r_res])
-                    
-                    if fusion_res['final_signal'] >= min_signal:
-                        results.append({
-                            'Ticker': ticker,
-                            'Nome': TICKER_NAMES.get(ticker, ticker),
-                            'Segnale AI': round(fusion_res['final_signal'], 2),
-                            'Previsione': fusion_res['prediction'],
-                            'Confidenza': f"{fusion_res['confidence']:.0%}",
-                            'Rischio': r_res.get('metadata', {}).get('risk_level', 'MEDIO')
-                        })
-            except Exception as e:
-                logger.error(f"Error in screener for {ticker}: {e}")
+        with st.spinner(f"Analisi e calcolo metriche IA per {len(candidates)} titoli su {sel_market_scr}..."):
+            p_agent = PriceAgent()
+            n_agent = NewsAgent()
+            sec_agent = SECAgent()
+            sm_agent = SmartMoneyAgent()
+            r_agent = RiskAgent()
+            fusion = SignalFusionEngine()
+            data_client = MarketDataClient()
             
-        bar.empty()
-        status_scr.success(f"✅ Screener completato con successo! ({len(results)} titoli sopra soglia)")
-        st.session_state['screener_results'] = results
-        st.session_state['screener_market'] = sel_market_scr
+            batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
+            results = []
+
+            for ticker in candidates:
+                try:
+                    df = batch_data.get(ticker, pd.DataFrame())
+                    if df is not None and not df.empty:
+                        data_payload = {"market_data": df, "is_batch": True}
+                        p_res = p_agent.analyze(ticker, data_payload)
+                        p_res['agent_name'] = p_agent.name
+                        n_res = n_agent.analyze(ticker, data_payload)
+                        n_res['agent_name'] = n_agent.name
+                        sec_res = sec_agent.analyze(ticker, data_payload)
+                        sec_res['agent_name'] = sec_agent.name
+                        sm_res = sm_agent.analyze(ticker, data_payload)
+                        sm_res['agent_name'] = sm_agent.name
+                        r_res = r_agent.analyze(ticker, data_payload)
+                        r_res['agent_name'] = r_agent.name
+                        
+                        fusion_res = fusion.process_signals([p_res, n_res, sec_res, sm_res, r_res])
+                        
+                        if fusion_res['final_signal'] >= min_signal:
+                            results.append({
+                                'Ticker': ticker,
+                                'Nome': TICKER_NAMES.get(ticker, ticker),
+                                'Segnale AI': round(fusion_res['final_signal'], 2),
+                                'Previsione': fusion_res['prediction'],
+                                'Confidenza': f"{fusion_res['confidence']:.0%}",
+                                'Rischio': r_res.get('metadata', {}).get('risk_level', 'MEDIO')
+                            })
+                except Exception as e:
+                    logger.error(f"Error in screener for {ticker}: {e}")
+                
+            st.session_state['screener_results'] = results
+            st.session_state['screener_market'] = sel_market_scr
+            st.success(f"✅ Screener completato: trovati {len(results)} titoli con segnale >= {min_signal:+.2f}!")
         
         if results:
             render_screener_top_5(results, sel_market_scr)
