@@ -1,4 +1,3 @@
-import yfinance as yf
 from core.base_agent import BaseAgent
 from loguru import logger
 import random
@@ -19,13 +18,6 @@ class SmartMoneyAgent(BaseAgent):
         logger.info(f"[{self.name}] Analizzando {ticker}...")
         
         try:
-            # Per un'implementazione reale, qui potresti usare API come Finnhub, Polygon 
-            # o fare scraping avanzato su OpenInsider. 
-            # Qui usiamo yfinance per tentare di recuperare i dati, o una logica simulata/euristica
-            # come proxy per dimostrare il funzionamento e formattare i risultati con la legenda.
-            
-            # Recupero dati con yfinance (spesso i dati istituzionali su yf richiedono tempo)
-            stock = yf.Ticker(ticker)
             
             # Simuliamo un'analisi di flussi per questo esempio
             # (In un caso d'uso reale, sostituiresti questa parte con chiamate API effettive)

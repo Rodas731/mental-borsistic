@@ -535,41 +535,6 @@ if page == "📡 Live Analysis":
     elif scan_fr:
         market_to_scan = "Francoforte"
 
-    def update_top_5_cards(current_results, market_name, placeholder):
-        sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
-        if not sorted_res or placeholder is None:
-            return
-            
-        with placeholder.container():
-            st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {market_name}")
-            
-            for i, r in enumerate(sorted_res):
-                c_name = TICKER_NAMES.get(r['ticker'], '')
-                title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
-                with st.expander(f"{title_str} | Segnale Finale: {r['final_signal']:+.2f} | Confidenza: {r['confidence']:.0%}", expanded=(i==0)):
-                    def fmt_sig(val):
-                        return f"{val:+.2f}" if val is not None else "N/A"
-                        
-                    sig_color = "green" if r['final_signal'] > 0 else "red" if r['final_signal'] < 0 else "gray"
-                    risk_level = r.get('risk_level', 'SCONOSCIUTO')
-                    
-                    html_content = f"""
-                    <div style="text-align: center; margin-bottom: 10px;">
-                        <h2 style="margin-bottom: 0px; color: {sig_color};">Segnale Finale: {r['final_signal']:+.2f}</h2>
-                        <span style="font-size: 0.85rem; color: gray;">Rischio Stimato: {risk_level}</span>
-                    </div>
-                    <div style="text-align: center; margin-bottom: 15px; font-size: 0.95rem;">
-                        <i>"{r['prediction']}"</i>
-                    </div>
-                    <div style="display: flex; justify-content: space-around; font-size: 0.85rem; padding: 8px; background-color: rgba(128,128,128,0.1); border-radius: 5px;">
-                        <div><b>Tecnico:</b> {fmt_sig(r.get('price_sig'))}</div>
-                        <div><b>Sentiment:</b> {fmt_sig(r.get('news_sig'))}</div>
-                        <div><b>Fondamentali:</b> {fmt_sig(r.get('sec_sig'))}</div>
-                        <div><b>Istituzionali:</b> {fmt_sig(r.get('smart_sig'))}</div>
-                    </div>
-                    """
-                    st.markdown(html_content, unsafe_allow_html=True)
-
     def render_completed_top_5(current_results, market_name):
         if not current_results:
             return
@@ -632,7 +597,6 @@ if page == "📡 Live Analysis":
         
         progress_bar = st.progress(0)
         status_text = st.empty()
-        top_5_placeholder = st.empty()
         results = []
         
         price_agent = PriceAgent()
@@ -656,7 +620,7 @@ if page == "📡 Live Analysis":
 
         for idx, ticker in enumerate(candidates):
             tk_label = TICKER_NAMES.get(ticker, ticker)
-            status_text.text(f"Analisi IA {idx+1}/{len(candidates)}: {ticker} ({tk_label})...")
+            status_text.text(f"Analisi IA ({idx+1}/{len(candidates)}): {ticker} ({tk_label})...")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
                 if df is not None and not df.empty:
@@ -703,20 +667,17 @@ if page == "📡 Live Analysis":
                             raw_data=res_fusion
                         )
                     except Exception as ex_db:
-                        logger.warning(f"Could not save signal to DB for {ticker}: {ex_db}")
+                        pass
             except Exception as e:
                 logger.error(f"Error analyzing {ticker}: {e}")
                 
-            if results:
-                update_top_5_cards(results, market_to_scan, top_5_placeholder)
-                
             progress_bar.progress((idx + 1) / len(candidates))
             
-        status_text.success("Scansione completata!")
+        progress_bar.empty()
+        status_text.success(f"✅ Scansione completata con successo! ({len(results)} titoli analizzati)")
         st.session_state['live_scan_results'] = results
         st.session_state['live_scan_market'] = market_to_scan
-        with top_5_placeholder.container():
-            render_completed_top_5(results, market_to_scan)
+        render_completed_top_5(results, market_to_scan)
     elif st.session_state.get('live_scan_results'):
         st.markdown("---")
         render_completed_top_5(st.session_state['live_scan_results'], st.session_state.get('live_scan_market', 'Scansione Recente'))
@@ -731,13 +692,36 @@ elif page == "🔎 Screener IA":
     sel_market_scr = st.selectbox("Seleziona Mercato da Scansionare:", list(market_lists.keys()))
     min_signal = st.slider("Soglia Minima Segnale Acquisto:", -1.0, 1.0, 0.20, step=0.05)
     
+    def render_screener_top_5(screener_res, market_name):
+        sorted_scr = sorted(screener_res, key=lambda x: x['Segnale AI'], reverse=True)[:5]
+        if not sorted_scr:
+            return
+        st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {market_name}")
+        for i, r in enumerate(sorted_scr):
+            tk = r['Ticker']
+            name = r['Nome']
+            sig = r['Segnale AI']
+            conf = r['Confidenza']
+            risk = r['Rischio']
+            pred = r['Previsione']
+            sig_color = "green" if sig > 0 else "red" if sig < 0 else "gray"
+            
+            with st.expander(f"#{i+1} {tk} ({name}) | Segnale AI: {sig:.2f} | Confidenza: {conf}", expanded=(i==0)):
+                st.markdown(f"""
+                <div style="display: flex; justify-content: space-around; align-items: center; padding: 12px; background-color: rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 10px;">
+                    <div style="text-align: center;"><b>Previsione:</b><br>{pred}</div>
+                    <div style="text-align: center;"><span style="font-size: 1.6rem; font-weight: bold; color: {sig_color};">Segnale: {sig:.2f}</span></div>
+                    <div style="text-align: center;"><b>Rischio:</b><br>{risk}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write(f"**Confidenza Globale dell'Analisi:** {conf}")
+
     if st.button("Avvia Screener IA"):
         candidates = market_lists[sel_market_scr]
         st.info(f"Analisi di {len(candidates)} titoli su {sel_market_scr}...")
         
         bar = st.progress(0)
         status_scr = st.empty()
-        top_5_scr_placeholder = st.empty()
         results = []
         
         p_agent = PriceAgent()
@@ -751,34 +735,9 @@ elif page == "🔎 Screener IA":
         status_scr.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli...")
         batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
 
-        def update_top_5_scr_ui(current_results):
-            sorted_scr = sorted(current_results, key=lambda x: x['Segnale AI'], reverse=True)[:5]
-            if not sorted_scr:
-                return
-            with top_5_scr_placeholder.container():
-                st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {sel_market_scr}")
-                for i, r in enumerate(sorted_scr):
-                    tk = r['Ticker']
-                    name = r['Nome']
-                    sig = r['Segnale AI']
-                    conf = r['Confidenza']
-                    risk = r['Rischio']
-                    pred = r['Previsione']
-                    sig_color = "green" if sig > 0 else "red" if sig < 0 else "gray"
-                    
-                    with st.expander(f"#{i+1} {tk} ({name}) | Segnale AI: {sig:.2f} | Confidenza: {conf}", expanded=(i==0)):
-                        st.markdown(f"""
-                        <div style="display: flex; justify-content: space-around; align-items: center; padding: 12px; background-color: rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 10px;">
-                            <div style="text-align: center;"><b>Previsione:</b><br>{pred}</div>
-                            <div style="text-align: center;"><span style="font-size: 1.6rem; font-weight: bold; color: {sig_color};">Segnale: {sig:.2f}</span></div>
-                            <div style="text-align: center;"><b>Rischio:</b><br>{risk}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.write(f"**Confidenza Globale dell'Analisi:** {conf}")
-
         for idx, ticker in enumerate(candidates):
             tk_name = TICKER_NAMES.get(ticker, ticker)
-            status_scr.text(f"Analisi Screener {idx+1}/{len(candidates)}: {ticker} ({tk_name})...")
+            status_scr.text(f"Analisi Screener ({idx+1}/{len(candidates)}): {ticker} ({tk_name})...")
             try:
                 df = batch_data.get(ticker, pd.DataFrame())
                 if df is not None and not df.empty:
@@ -805,17 +764,17 @@ elif page == "🔎 Screener IA":
                             'Confidenza': f"{fusion_res['confidence']:.0%}",
                             'Rischio': r_res.get('metadata', {}).get('risk_level', 'MEDIO')
                         })
-                        update_top_5_scr_ui(results)
             except Exception as e:
                 logger.error(f"Error in screener for {ticker}: {e}")
             bar.progress((idx + 1) / len(candidates))
             
-        status_scr.success("Screener completato!")
+        bar.empty()
+        status_scr.success(f"✅ Screener completato con successo! ({len(results)} titoli sopra soglia)")
         st.session_state['screener_results'] = results
         st.session_state['screener_market'] = sel_market_scr
-        update_top_5_scr_ui(results)
         
         if results:
+            render_screener_top_5(results, sel_market_scr)
             st.markdown("---")
             st.subheader("📋 Tabella Completa Risultati Screener")
             df_res = pd.DataFrame(results).sort_values(by='Segnale AI', ascending=False)
@@ -824,6 +783,7 @@ elif page == "🔎 Screener IA":
             st.warning("Nessun titolo supera la soglia di segnale selezionata.")
     elif st.session_state.get('screener_results'):
         st.markdown("---")
+        render_screener_top_5(st.session_state['screener_results'], st.session_state.get('screener_market', ''))
         st.subheader(f"📋 Ultimi Risultati Screener ({st.session_state.get('screener_market', '')})")
         df_res = pd.DataFrame(st.session_state['screener_results']).sort_values(by='Segnale AI', ascending=False)
         st.dataframe(df_res, width="stretch", hide_index=True)
