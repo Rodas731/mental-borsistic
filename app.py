@@ -532,12 +532,12 @@ if page == "📡 Live Analysis":
     elif scan_fr:
         market_to_scan = "Francoforte"
 
-    def update_top_5_cards(current_results, market_name):
+    def update_top_5_cards(current_results, market_name, placeholder):
         sorted_res = sorted(current_results, key=lambda x: x['final_signal'], reverse=True)[:5]
-        if not sorted_res:
+        if not sorted_res or placeholder is None:
             return
             
-        with top_5_placeholder.container():
+        with placeholder.container():
             st.subheader(f"🏆 Top 5 Titoli con Score Maggiore - {market_name}")
             
             for i, r in enumerate(sorted_res):
@@ -706,7 +706,7 @@ if page == "📡 Live Analysis":
                 pass
                 
             if results:
-                update_top_5_cards(results, market_to_scan)
+                update_top_5_cards(results, market_to_scan, top_5_placeholder)
                 
             progress_bar.progress((idx + 1) / len(candidates))
             
@@ -733,6 +733,11 @@ elif page == "🔎 Screener IA":
         candidates = market_lists[sel_market_scr]
         st.info(f"Analisi di {len(candidates)} titoli su {sel_market_scr}...")
         
+        bar = st.progress(0)
+        status_scr = st.empty()
+        top_5_scr_placeholder = st.empty()
+        results = []
+        
         p_agent = PriceAgent()
         n_agent = NewsAgent()
         sec_agent = SECAgent()
@@ -743,11 +748,6 @@ elif page == "🔎 Screener IA":
         
         status_scr.text(f"Scaricamento pacchetto dati per {len(candidates)} titoli...")
         batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
-        
-        results = []
-        bar = st.progress(0)
-        status_scr = st.empty()
-        top_5_scr_placeholder = st.empty()
 
         def update_top_5_scr_ui(current_results):
             sorted_scr = sorted(current_results, key=lambda x: x['Segnale AI'], reverse=True)[:5]
@@ -811,6 +811,8 @@ elif page == "🔎 Screener IA":
             bar.progress((idx + 1) / len(candidates))
             
         status_scr.success("Screener completato!")
+        st.session_state['screener_results'] = results
+        st.session_state['screener_market'] = sel_market_scr
         update_top_5_scr_ui(results)
         
         if results:
@@ -820,6 +822,11 @@ elif page == "🔎 Screener IA":
             st.dataframe(df_res, width="stretch", hide_index=True)
         else:
             st.warning("Nessun titolo supera la soglia di segnale selezionata.")
+    elif st.session_state.get('screener_results'):
+        st.markdown("---")
+        st.subheader(f"📋 Ultimi Risultati Screener ({st.session_state.get('screener_market', '')})")
+        df_res = pd.DataFrame(st.session_state['screener_results']).sort_values(by='Segnale AI', ascending=False)
+        st.dataframe(df_res, width="stretch", hide_index=True)
 
 # ---------------------------------------------------------
 # PAGE 3: 💼 Paper Trading

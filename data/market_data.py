@@ -56,15 +56,25 @@ def _fetch_batch_historical_prices_cached(tickers: tuple, period: str = "6mo", i
         else:
             for t in tickers_list:
                 try:
+                    df_t = None
                     if isinstance(data.columns, pd.MultiIndex):
-                        if t in data.columns.levels[0]:
-                            df_t = data[t].dropna(how='all')
-                            if not df_t.empty:
-                                result[t] = df_t
+                        # MultiIndex can have Ticker as level 0 or level 1
+                        if 'Ticker' in data.columns.names:
+                            lvl = data.columns.names.index('Ticker')
+                            if t in data.columns.get_level_values(lvl):
+                                df_t = data.xs(t, level=lvl, axis=1)
+                        else:
+                            if t in data.columns.get_level_values(0):
+                                df_t = data[t]
+                            elif t in data.columns.get_level_values(1):
+                                df_t = data.xs(t, level=1, axis=1)
                     elif t in data:
-                        df_t = data[t].dropna(how='all')
-                        if not df_t.empty:
-                            result[t] = df_t
+                        df_t = data[t]
+                    
+                    if df_t is not None and not df_t.empty:
+                        clean_t = df_t.dropna(how='all')
+                        if not clean_t.empty:
+                            result[t] = clean_t
                 except Exception as ex:
                     logger.debug(f"Could not extract sub-dataframe for {t}: {ex}")
                     

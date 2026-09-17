@@ -1,7 +1,20 @@
 import requests
 import pandas as pd
+import streamlit as st
 from core.base_agent import BaseAgent
 from loguru import logger
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_cik_map(headers_tuple: tuple) -> dict:
+    try:
+        url = "https://www.sec.gov/files/company_tickers.json"
+        response = requests.get(url, headers=dict(headers_tuple), timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return {val['ticker'].upper(): str(val['cik_str']).zfill(10) for val in data.values() if 'ticker' in val and 'cik_str' in val}
+    except Exception as e:
+        logger.error(f"Error fetching CIK map: {e}")
+    return {}
 
 class SECAgent(BaseAgent):
     """
@@ -15,15 +28,8 @@ class SECAgent(BaseAgent):
 
     def _get_cik(self, ticker: str) -> str:
         try:
-            # Get the CIK mappings
-            url = "https://www.sec.gov/files/company_tickers.json"
-            response = requests.get(url, headers=self.headers)
-            if response.status_code == 200:
-                data = response.json()
-                for key, val in data.items():
-                    if val['ticker'].upper() == ticker.upper():
-                        return str(val['cik_str']).zfill(10)
-            return ""
+            cik_map = _fetch_cik_map(tuple(self.headers.items()))
+            return cik_map.get(ticker.upper(), "")
         except Exception as e:
             logger.error(f"Error fetching CIK for {ticker}: {e}")
             return ""
@@ -48,7 +54,7 @@ class SECAgent(BaseAgent):
         try:
             # Fetch company facts (XBRL data)
             url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-            response = requests.get(url, headers=self.headers)
+            response = requests.get(url, headers=self.headers, timeout=5)
             
             if response.status_code != 200:
                 return {"signal": 0.0, "confidence": 0.0, "reasoning": "Failed to retrieve SEC facts."}
