@@ -625,6 +625,9 @@ if page == "📡 Live Analysis":
         elif scan_fr:
             scan_market = "Francoforte"
 
+        # DEBUG TEMPORANEO — verrà rimosso dopo verifica
+        st.caption(f"🔍 DEBUG: scan_mi={scan_mi} | scan_ny={scan_ny} | scan_pa={scan_pa} | scan_fr={scan_fr} | market={scan_market}")
+
         if scan_market:
             progress_box = st.container(border=True)
             progress_box.write(f"🚀 **Avvio scansione {scan_market}...**")
