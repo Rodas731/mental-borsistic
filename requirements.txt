@@ -1,6 +1,6 @@
 # Data Sources
-yfinance
-pandas
+yfinance>=0.2.40
+pandas>=2.0.0
 requests
 beautifulsoup4
 
@@ -10,7 +10,7 @@ scikit-learn
 numpy
 
 # Dashboard
-streamlit
+streamlit>=1.40.0
 plotly
 
 # Misc

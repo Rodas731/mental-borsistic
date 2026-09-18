@@ -467,13 +467,13 @@ if page == "📡 Live Analysis":
         
         col_mi, col_ny, col_pa, col_fr = st.columns(4)
         with col_mi:
-            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi", width="stretch")
+            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi", use_container_width=True)
         with col_ny:
-            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny", width="stretch")
+            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny", use_container_width=True)
         with col_pa:
-            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa", width="stretch")
+            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa", use_container_width=True)
         with col_fr:
-            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr", width="stretch")
+            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr", use_container_width=True)
 
         def fmt_sig(val):
             return f"{val:+.2f}" if val is not None else "N/A"
