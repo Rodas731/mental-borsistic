@@ -465,15 +465,16 @@ if page == "📡 Live Analysis":
         st.header("🚀 Scansione Opportunità Massiva")
         st.markdown("Seleziona la piazza finanziaria da scansionare per trovare le migliori occasioni di acquisto in tempo reale.")
         
-        col_mi, col_ny, col_pa, col_fr = st.columns(4)
-        with col_mi:
-            scan_mi = st.button("🇮🇹 Scansiona Milano", key="btn_scan_mi", use_container_width=True)
-        with col_ny:
-            scan_ny = st.button("🇺🇸 Scansiona New York", key="btn_scan_ny", use_container_width=True)
-        with col_pa:
-            scan_pa = st.button("🇫🇷 Scansiona Parigi", key="btn_scan_pa", use_container_width=True)
-        with col_fr:
-            scan_fr = st.button("🇩🇪 Scansiona Francoforte", key="btn_scan_fr", use_container_width=True)
+        with st.form("scan_form"):
+            col_mi, col_ny, col_pa, col_fr = st.columns(4)
+            with col_mi:
+                scan_mi = st.form_submit_button("🇮🇹 Scansiona Milano", use_container_width=True)
+            with col_ny:
+                scan_ny = st.form_submit_button("🇺🇸 Scansiona New York", use_container_width=True)
+            with col_pa:
+                scan_pa = st.form_submit_button("🇫🇷 Scansiona Parigi", use_container_width=True)
+            with col_fr:
+                scan_fr = st.form_submit_button("🇩🇪 Scansiona Francoforte", use_container_width=True)
 
         def fmt_sig(val):
             return f"{val:+.2f}" if val is not None else "N/A"
