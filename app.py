@@ -486,12 +486,12 @@ if page == "📡 Live Analysis":
             
             progress_container.write(f"📥 Scaricamento dati per **{len(candidates)} titoli** ({market_name})...")
             data_client = MarketDataClient()
-            batch_data = data_client.get_batch_historical_prices(candidates, period="6mo")
+            batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
             loaded = len([t for t in candidates if t in batch_data and batch_data[t] is not None and not batch_data[t].empty])
-            progress_container.write(f"✅ Download completato: **{loaded}/{len(candidates)}** titoli con dati validi.")
+            progress_container.write(f"✅ Download: **{loaded}/{len(candidates)}** titoli con dati validi.")
             
             if loaded == 0:
-                progress_container.error("❌ Nessun dato scaricato da Yahoo Finance. Mercati chiusi o server non disponibile.")
+                progress_container.error("❌ Nessun dato scaricato. Mercati chiusi o server non disponibile.")
                 return []
             
             progress_container.write("📊 Analisi macroeconomica globale (SPY)...")
@@ -626,8 +626,9 @@ if page == "📡 Live Analysis":
         elif scan_fr:
             scan_market = "Francoforte"
 
-        # DEBUG TEMPORANEO — verrà rimosso dopo verifica
-        st.caption(f"🔍 DEBUG: scan_mi={scan_mi} | scan_ny={scan_ny} | scan_pa={scan_pa} | scan_fr={scan_fr} | market={scan_market}")
+        # DEBUG TEMPORANEO
+        n_state = len(st.session_state.get('live_scan_results') or [])
+        st.caption(f"🔍 DEBUG: scan_mi={scan_mi} | market={scan_market} | results_in_state={n_state}")
 
         if scan_market:
             progress_box = st.container(border=True)
