@@ -614,7 +614,7 @@ if page == "📡 Live Analysis":
     <div><b>Istituzionali:</b> {ms}</div>
 </div>""", unsafe_allow_html=True)
 
-        # --- Blocco principale: esegui scansione nel run del bottone, poi mostra risultati ---
+        # --- Blocco principale: identico allo Screener IA che funziona ---
         scan_market = None
         if scan_mi:
             scan_market = "Milano"
@@ -632,15 +632,22 @@ if page == "📡 Live Analysis":
                 scan_results = run_scan_and_store(scan_market, progress_box)
             except Exception as e:
                 logger.error(f"Errore scansione: {e}")
-                progress_box.error(f"❌ Errore fatale durante la scansione: {e}")
-
-        if st.session_state.get('live_scan_results'):
+                progress_box.error(f"❌ Errore fatale: {e}")
+                scan_results = []
+            # Render NELLO STESSO RUN del bottone (identico allo Screener IA)
+            if scan_results:
+                render_top5(scan_results, scan_market)
+            else:
+                st.warning("⚠️ Nessun titolo analizzato. Riprova tra qualche istante.")
+        elif st.session_state.get('live_scan_results'):
+            # Mostra risultati dell'ultima scansione se già presenti
             render_top5(
                 st.session_state['live_scan_results'],
                 st.session_state.get('live_scan_market', 'Ultima Scansione')
             )
         else:
             st.info("👉 Clicca su uno dei 4 pulsanti in alto per scansionare il mercato e visualizzare la Top 5 dei titoli raccomandati.")
+
 
     with tab_search:
         st.header("🔍 Ricerca e Analisi Singolo Titolo")
