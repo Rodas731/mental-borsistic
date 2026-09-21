@@ -151,7 +151,7 @@ class AutotradingAgent:
                 logger.info(f"FULL EXIT (100%) triggered for {ticker} with Exit Score: {exit_score:.2f} (Valore posizione: €{pos_value:,.2f})")
                 return current_shares
             
-      def run_step(self, tickers: list = None) -> dict:
+    def run_step(self, tickers: list = None) -> dict:
         """
         Runs one step of the autotrading agent on a specific list of tickers.
         Analyzes them using fast batch downloading and saves signals to DB, then executes the cycle.
@@ -389,6 +389,4 @@ class AutotradingAgent:
             "message": summary_msg,
             "actions": actions_taken,
             "decision_logs": decision_logs
-        }
-    "actions": actions_taken
         }
