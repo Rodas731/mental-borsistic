@@ -163,6 +163,38 @@ def save_signal(ticker: str, prediction_or_signal=None, final_signal: float = No
     except Exception as e:
         logger.error(f"Error in save_signal for {ticker}: {e}")
 
+def save_signals_batch(signals_list: list):
+    """Saves a batch of signals in a single fast SQLite transaction."""
+    if not signals_list:
+        return
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        
+        for s in signals_list:
+            ticker = s.get('ticker')
+            if not ticker:
+                continue
+            pred = str(s.get('prediction', 'NEUTRALE'))
+            sig = float(s.get('final_signal', 0.0))
+            conf = float(s.get('confidence', 0.0))
+            risk = str(s.get('risk_level', 'SCONOSCIUTO'))
+            raw = s.get('raw_data', {})
+            
+            cursor.execute("DELETE FROM signals WHERE ticker=? AND date=?", (ticker, date_str))
+            cursor.execute('''
+                INSERT INTO signals (ticker, date, prediction, final_signal, confidence, risk_level, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (ticker, date_str, pred, sig, conf, risk, json.dumps(raw)))
+            
+        conn.commit()
+        conn.close()
+        logger.info(f"Successfully saved {len(signals_list)} signals in batch.")
+    except Exception as e:
+        logger.error(f"Error in save_signals_batch: {e}")
+
+
 def get_latest_signals():
     """Retrieves the latest signals for the Screener UI."""
     conn = get_connection()

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
+from loguru import logger
 from data.market_data import MarketDataClient, search_by_isin_or_keyword
 from agents.price_agent import PriceAgent
 from agents.news_agent import NewsAgent
@@ -11,7 +12,7 @@ from agents.risk_agent import RiskAgent
 from agents.macro_agent import MacroAgent
 from core.fusion_engine import SignalFusionEngine
 from data.db import (
-    get_latest_signals, get_portfolio, get_trade_history, execute_trade, save_signal,
+    get_latest_signals, get_portfolio, get_trade_history, execute_trade, save_signal, save_signals_batch,
     get_agent_account, set_agent_budget, get_agent_portfolio, get_agent_trades,
     get_paper_deposits, add_paper_deposit, delete_paper_deposit, get_paper_account_summary,
     verify_user_credentials,
@@ -602,6 +603,7 @@ elif page == "🔎 Screener IA":
             
             batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
             results = []
+            signals_to_save = []
 
             for ticker in candidates:
                 try:
@@ -622,18 +624,14 @@ elif page == "🔎 Screener IA":
                         fusion_res = fusion.process_signals([p_res, n_res, sec_res, sm_res, r_res])
                         risk_level_str = r_res.get('metadata', {}).get('risk_level', 'MEDIO')
                         
-                        # Salvataggio nel Database per AI Autotrading
-                        try:
-                            save_signal(
-                                ticker=ticker,
-                                prediction=fusion_res['prediction'],
-                                final_signal=fusion_res['final_signal'],
-                                confidence=fusion_res['confidence'],
-                                risk_level=risk_level_str,
-                                raw_data=fusion_res
-                            )
-                        except Exception as ex:
-                            logger.error(f"Errore nel salvataggio segnale per {ticker}: {ex}")
+                        signals_to_save.append({
+                            'ticker': ticker,
+                            'prediction': fusion_res['prediction'],
+                            'final_signal': fusion_res['final_signal'],
+                            'confidence': fusion_res['confidence'],
+                            'risk_level': risk_level_str,
+                            'raw_data': fusion_res
+                        })
                         
                         if fusion_res['final_signal'] >= min_signal:
                             results.append({
@@ -645,7 +643,11 @@ elif page == "🔎 Screener IA":
                                 'Rischio': risk_level_str
                             })
                 except Exception as e:
-                    logger.error(f"Error in screener for {ticker}: {e}")
+                    logger.debug(f"Skip {ticker}: {e}")
+            
+            # Salvataggio veloce in un'unica transazione SQLite
+            if signals_to_save:
+                save_signals_batch(signals_to_save)
                 
             st.session_state['screener_results'] = results
             st.session_state['screener_market'] = sel_market_scr
