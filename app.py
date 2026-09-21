@@ -14,7 +14,8 @@ from data.db import (
     get_latest_signals, get_portfolio, get_trade_history, execute_trade, save_signal,
     get_agent_account, set_agent_budget, get_agent_portfolio, get_agent_trades,
     get_paper_deposits, add_paper_deposit, delete_paper_deposit, get_paper_account_summary,
-    verify_user_credentials
+    verify_user_credentials,
+    get_watchlist, add_watchlist_item, update_watchlist_item, delete_watchlist_item
 )
 from agents.autotrading_agent import AutotradingAgent
 from data.ticker_names import TICKER_NAMES
@@ -388,7 +389,7 @@ if st.sidebar.button("🚪 Disconnetti", use_container_width=True):
 
 st.sidebar.markdown("---")
 st.sidebar.title("Navigazione")
-page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Screener IA", "💼 Paper Trading", "🤖 AI Autotrading"])
+page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Screener IA", "📋 Lista Titoli", "💼 Paper Trading", "🤖 AI Autotrading"])
 
 # Definizione Liste Titoli
 market_lists = {
@@ -455,136 +456,10 @@ if page == "📡 Live Analysis":
     portfolio = get_portfolio()
     portfolio_tickers = [p['ticker'] for p in portfolio] if portfolio else []
 
-    tab_scan, tab_search, tab_portfolio = st.tabs([
-        "🚀 Scansione Mercati (Massiva)", 
+    tab_search, tab_portfolio = st.tabs([
         "🔍 Ricerca Ad-Hoc Singolo Titolo", 
         "🛡️ Radar di Uscita & Portafoglio"
     ])
-
-    with tab_scan:
-        st.header("🚀 Scansione Opportunità Massiva")
-        st.markdown("Seleziona la piazza finanziaria da scansionare per trovare le migliori occasioni di acquisto in tempo reale.")
-        
-        with st.form("scan_form"):
-            col_mi, col_ny, col_pa, col_fr = st.columns(4)
-            with col_mi:
-                scan_mi = st.form_submit_button("🇮🇹 Scansiona Milano", use_container_width=True)
-            with col_ny:
-                scan_ny = st.form_submit_button("🇺🇸 Scansiona New York", use_container_width=True)
-            with col_pa:
-                scan_pa = st.form_submit_button("🇫🇷 Scansiona Parigi", use_container_width=True)
-            with col_fr:
-                scan_fr = st.form_submit_button("🇩🇪 Scansiona Francoforte", use_container_width=True)
-
-        def fmt_sig(val):
-            return f"{val:+.2f}" if val is not None else "N/A"
-
-        def render_top5(results, market_name):
-            if not results:
-                st.warning("⚠️ Nessun titolo analizzato. Riprova tra qualche istante.")
-                return
-            sorted_res = sorted(results, key=lambda x: x['final_signal'], reverse=True)[:5]
-            st.success(f"✅ Scansione completata — **{market_name}** | {len(results)} titoli analizzati")
-            st.subheader(f"🏆 Top 5 Opportunità — {market_name}")
-            table_rows = []
-            for i, r in enumerate(sorted_res):
-                c_name = TICKER_NAMES.get(r['ticker'], '')
-                table_rows.append({
-                    '#': f"#{i+1}", 'Ticker': r['ticker'],
-                    'Nome': c_name if c_name else r['ticker'],
-                    'Segnale AI': fmt_sig(r['final_signal']),
-                    'Previsione': r['prediction'],
-                    'Confidenza': f"{r['confidence']:.0%}",
-                    'Rischio': r.get('risk_level', 'N/D'),
-                    'Tecnico': fmt_sig(r.get('price_sig')),
-                    'Sentiment': fmt_sig(r.get('news_sig')),
-                    'Fondamentali': fmt_sig(r.get('sec_sig')),
-                    'Smart Money': fmt_sig(r.get('smart_sig'))
-                })
-            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-            st.markdown("#### 🔍 Schede Dettagliate Top 5")
-            for i, r in enumerate(sorted_res):
-                c_name = TICKER_NAMES.get(r['ticker'], '')
-                title_str = f"#{i+1} {r['ticker']} ({c_name})" if c_name else f"#{i+1} {r['ticker']}"
-                sc = "green" if r['final_signal'] > 0 else ("red" if r['final_signal'] < 0 else "gray")
-                rl = r.get('risk_level', 'N/D')
-                fs = r['final_signal']; cf = r['confidence']; pr = r['prediction']
-                ps = fmt_sig(r.get('price_sig')); ns = fmt_sig(r.get('news_sig'))
-                ss = fmt_sig(r.get('sec_sig')); ms = fmt_sig(r.get('smart_sig'))
-                with st.expander(f"{title_str} | Segnale: {fs:+.2f} | Conf: {cf:.0%}", expanded=(i==0)):
-                    st.markdown(f"""
-<div style="text-align:center;padding:12px;border-radius:8px;background:rgba(128,128,128,0.1);margin-bottom:10px;">
-    <h2 style="color:{sc};margin:0;">Segnale: {fs:+.2f}</h2>
-    <p style="color:gray;margin:4px 0;">Rischio: {rl} | Confidenza: {cf:.0%}</p>
-    <i>"{pr}"</i>
-</div>
-<div style="display:flex;justify-content:space-around;font-size:0.85rem;padding:8px;background:rgba(128,128,128,0.07);border-radius:5px;">
-    <div><b>Tecnico:</b> {ps}</div><div><b>Sentiment:</b> {ns}</div>
-    <div><b>Fondamentali:</b> {ss}</div><div><b>Istituzionali:</b> {ms}</div>
-</div>""", unsafe_allow_html=True)
-
-        # --- Identico allo Screener IA che funziona ---
-        scan_market = None
-        if scan_mi: scan_market = "Milano"
-        elif scan_ny: scan_market = "New York"
-        elif scan_pa: scan_market = "Parigi"
-        elif scan_fr: scan_market = "Francoforte"
-
-        if scan_market:
-            candidates = [t for t in market_lists[scan_market] if t not in portfolio_tickers]
-            # Identico allo Screener: spinner semplice, no MacroAgent, no progress_bar per ticker
-            with st.spinner(f"Analisi e calcolo metriche IA per {len(candidates)} titoli su {scan_market}..."):
-                p_agent = PriceAgent()
-                n_agent = NewsAgent()
-                sec_agent_obj = SECAgent()
-                sm_agent = SmartMoneyAgent()
-                r_agent = RiskAgent()
-                fusion = SignalFusionEngine()
-                data_client = MarketDataClient()
-                batch_data = data_client.get_batch_historical_prices(candidates, period="3mo")
-                results = []
-                for ticker in candidates:
-                    try:
-                        df = batch_data.get(ticker, pd.DataFrame())
-                        if df is not None and not df.empty:
-                            data_payload = {"market_data": df, "is_batch": True}
-                            p_res = p_agent.analyze(ticker, data_payload); p_res['agent_name'] = p_agent.name
-                            n_res = n_agent.analyze(ticker, data_payload); n_res['agent_name'] = n_agent.name
-                            s_res = sec_agent_obj.analyze(ticker, data_payload); s_res['agent_name'] = sec_agent_obj.name
-                            sm_res = sm_agent.analyze(ticker, data_payload); sm_res['agent_name'] = sm_agent.name
-                            rr_res = r_agent.analyze(ticker, data_payload); rr_res['agent_name'] = r_agent.name
-                            fusion_res = fusion.process_signals([p_res, n_res, s_res, sm_res, rr_res])
-                            results.append({
-                                'ticker': ticker,
-                                'final_signal': fusion_res['final_signal'],
-                                'confidence': fusion_res['confidence'],
-                                'prediction': fusion_res['prediction'],
-                                'risk_level': rr_res.get('metadata', {}).get('risk_level', 'MEDIO'),
-                                'price_sig': p_res.get('signal'),
-                                'news_sig': n_res.get('signal'),
-                                'sec_sig': s_res.get('signal'),
-                                'smart_sig': sm_res.get('signal')
-                            })
-                            try:
-                                save_signal(ticker=ticker, prediction=fusion_res['prediction'],
-                                    final_signal=fusion_res['final_signal'], confidence=fusion_res['confidence'],
-                                    risk_level=rr_res.get('metadata', {}).get('risk_level', 'MEDIO'), raw_data=fusion_res)
-                            except Exception: pass
-                    except Exception as e:
-                        logger.error(f"Error analyzing {ticker}: {e}")
-                st.session_state['live_scan_results'] = results
-                st.session_state['live_scan_market'] = scan_market
-
-            if results:
-                render_top5(results, scan_market)
-            else:
-                st.warning("⚠️ Nessun titolo con dati disponibili. Riprova tra qualche minuto.")
-
-        elif st.session_state.get('live_scan_results'):
-            render_top5(st.session_state['live_scan_results'],
-                        st.session_state.get('live_scan_market', 'Ultima Scansione'))
-        else:
-            st.info("👉 Clicca su uno dei 4 pulsanti in alto per scansionare il mercato e visualizzare la Top 5.")
 
     with tab_search:
         st.header("🔍 Ricerca e Analisi Singolo Titolo")
@@ -744,7 +619,82 @@ elif page == "🔎 Screener IA":
         st.dataframe(df_res, width="stretch", hide_index=True)
 
 # ---------------------------------------------------------
-# PAGE 3: 💼 Paper Trading
+# PAGE 3: 📋 Lista Titoli
+# ---------------------------------------------------------
+elif page == "📋 Lista Titoli":
+    st.title("📋 Lista Titoli Personale")
+    st.markdown("Gestisci la tua lista personale di titoli da monitorare. Aggiungi titoli e annotazioni libere per ogni posizione.")
+
+    watchlist = get_watchlist()
+
+    # --- FORM AGGIUNTA NUOVO TITOLO ---
+    with st.expander("➕ Aggiungi un nuovo titolo alla lista", expanded=True):
+        with st.form("wl_add_form", clear_on_submit=True):
+            wcol1, wcol2 = st.columns([1, 2])
+            with wcol1:
+                wl_ticker = st.text_input("Ticker (es. AAPL, ENEL.MI)", placeholder="AAPL").upper().strip()
+                wl_label = st.text_input("Etichetta (opzionale)", placeholder="Es: Candidato acquisto")
+            with wcol2:
+                wl_note = st.text_area("Note iniziali", placeholder="Inserisci qui le tue osservazioni, motivazioni, livelli di prezzo di interesse...", height=100)
+            if st.form_submit_button("✅ Aggiungi Titolo", type="primary", use_container_width=True):
+                if wl_ticker:
+                    ok = add_watchlist_item(wl_ticker, wl_label, wl_note)
+                    if ok:
+                        st.success(f"✅ Titolo **{wl_ticker}** aggiunto alla lista!")
+                        st.rerun()
+                    else:
+                        st.error("Errore durante il salvataggio. Riprova.")
+                else:
+                    st.warning("Inserisci almeno il ticker del titolo.")
+
+    st.markdown("---")
+
+    # --- LISTA TITOLI SALVATI ---
+    if not watchlist:
+        st.info("📭 La lista è vuota. Aggiungi il primo titolo usando il pannello qui sopra.")
+    else:
+        st.markdown(f"**{len(watchlist)} titoli in lista:**")
+        for item in watchlist:
+            item_id = item['id']
+            ticker = item['ticker']
+            label = item.get('label') or ''
+            note = item.get('note') or ''
+            created = item.get('created_at', '')[:10]
+
+            c_name = TICKER_NAMES.get(ticker, '')
+            display_name = f"{ticker} — {c_name}" if c_name else ticker
+            header_label = f" · *{label}*" if label else ''
+
+            with st.expander(f"📌 {display_name}{header_label}  |  Aggiunto: {created}", expanded=False):
+                edit_col, del_col = st.columns([4, 1])
+                with edit_col:
+                    new_label = st.text_input(
+                        "Etichetta",
+                        value=label,
+                        key=f"wl_label_{item_id}",
+                        placeholder="Es: Candidato acquisto, Osservazione..."
+                    )
+                    new_note = st.text_area(
+                        "📝 Note",
+                        value=note,
+                        key=f"wl_note_{item_id}",
+                        height=120,
+                        placeholder="Le tue osservazioni, livelli chiave, strategie..."
+                    )
+                    if st.button("💾 Salva modifiche", key=f"wl_save_{item_id}"):
+                        update_watchlist_item(item_id, label=new_label, note=new_note)
+                        st.success("Modifiche salvate!")
+                        st.rerun()
+                with del_col:
+                    st.write("")
+                    st.write("")
+                    st.write("")
+                    if st.button("🗑️ Elimina", key=f"wl_del_{item_id}", type="secondary"):
+                        delete_watchlist_item(item_id)
+                        st.rerun()
+
+# ---------------------------------------------------------
+# PAGE 4: 💼 Paper Trading
 # ---------------------------------------------------------
 elif page == "💼 Paper Trading":
     st.title("💼 Simulatore di Portafoglio (Paper Trading)")
@@ -949,7 +899,7 @@ elif page == "💼 Paper Trading":
         st.info("Nessuna operazione registrata.")
 
 # ---------------------------------------------------------
-# PAGE 4: 🤖 AI Autotrading
+# PAGE 5: 🤖 AI Autotrading
 # ---------------------------------------------------------
 elif page == "🤖 AI Autotrading":
     st.title("🤖 Agente Autonomo di Trading (AI Autotrading)")

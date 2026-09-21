@@ -113,6 +113,17 @@ def init_db():
         init_default_user(cursor)
 
         init_agent_db(cursor)
+
+        # Tabella per la watchlist personalizzata dell'utente
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                label TEXT,
+                note TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
         
         conn.commit()
         conn.close()
@@ -527,6 +538,73 @@ def update_user_password(username: str, new_password: str) -> bool:
         logger.error(f"Error updating password: {e}")
         return False
 
+# ---------------------------------------------------------------------------
+# Watchlist personalizzata
+# ---------------------------------------------------------------------------
+
+def get_watchlist() -> list:
+    """Restituisce tutti i titoli nella watchlist personalizzata."""
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM watchlist ORDER BY created_at DESC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.error(f"Error in get_watchlist: {e}")
+        return []
+
+def add_watchlist_item(ticker: str, label: str = "", note: str = "") -> bool:
+    """Aggiunge un titolo alla watchlist."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO watchlist (ticker, label, note, created_at) VALUES (?, ?, ?, ?)",
+            (ticker.strip().upper(), label.strip(), note.strip(), now)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error in add_watchlist_item: {e}")
+        return False
+
+def update_watchlist_item(item_id: int, label: str = None, note: str = None) -> bool:
+    """Aggiorna etichetta e/o nota di un elemento della watchlist."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if label is not None and note is not None:
+            cursor.execute("UPDATE watchlist SET label=?, note=? WHERE id=?", (label.strip(), note.strip(), item_id))
+        elif label is not None:
+            cursor.execute("UPDATE watchlist SET label=? WHERE id=?", (label.strip(), item_id))
+        elif note is not None:
+            cursor.execute("UPDATE watchlist SET note=? WHERE id=?", (note.strip(), item_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error in update_watchlist_item: {e}")
+        return False
+
+def delete_watchlist_item(item_id: int) -> bool:
+    """Rimuove un titolo dalla watchlist."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM watchlist WHERE id=?", (item_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error in delete_watchlist_item: {e}")
+        return False
+
 # Initialize on import
 init_db()
+
 
