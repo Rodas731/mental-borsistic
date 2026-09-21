@@ -389,7 +389,7 @@ if st.sidebar.button("🚪 Disconnetti", use_container_width=True):
 
 st.sidebar.markdown("---")
 st.sidebar.title("Navigazione")
-page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Screener IA", "📋 Lista Titoli", "💼 Paper Trading", "🤖 AI Autotrading"])
+page = st.sidebar.radio("Scegli la Modalità:", ["📡 Live Analysis", "🔎 Screener IA", "📋 Lista Titoli", "💼 Paper Trading", "🤖 AI Autotrading", "🌐 Guida & Trova Ticker"])
 
 # Definizione Liste Titoli
 market_lists = {
@@ -1021,3 +1021,158 @@ elif page == "🤖 AI Autotrading":
             st.dataframe(df_at_disp, width="stretch", hide_index=True)
         else:
             st.info("Nessuna operazione registrata dall'agente.")
+
+# ---------------------------------------------------------
+# PAGE 6: 🌐 Guida & Trova Ticker
+# ---------------------------------------------------------
+elif page == "🌐 Guida & Trova Ticker":
+    st.title("🌐 Guida alle Borse & Ricerca Ticker")
+    st.markdown("Questa sezione ti aiuta a trovare la corretta formattazione dei ticker per qualsiasi borsa mondiale e a verificare in tempo reale se un titolo è supportato dall'app.")
+
+    tab_verifier, tab_guide = st.tabs(["🔍 Verificatore Ticker Live", "📖 Legenda Borse & Suffissi"])
+
+    with tab_verifier:
+        st.subheader("🔍 Verifica Compatibilità Ticker in Tempo Reale")
+        st.markdown("Inserisci il ticker (o componilo scegliendo il mercato) per controllare se Yahoo Finance fornisce i dati e visualizzare subito le informazioni chiave dell'azienda.")
+
+        vcol1, vcol2 = st.columns([2, 1])
+        with vcol1:
+            raw_input = st.text_input("Inserisci il simbolo del titolo (es. AAPL, ENEL, MC, SAP, ASML, SHEL):", key="val_ticker_input").upper().strip()
+        with vcol2:
+            suffix_choice = st.selectbox("Seleziona Mercato / Suffisso:", [
+                "Nessuno (USA - NYSE/NASDAQ)",
+                ".MI (Italia - Milano)",
+                ".DE (Germania - Francoforte / XETRA)",
+                ".PA (Francia - Parigi)",
+                ".AS (Paesi Bassi - Amsterdam)",
+                ".MC (Spagna - Madrid)",
+                ".L (Regno Unito - Londra)",
+                ".SW (Svizzera - Zurigo)",
+                ".ST (Svezia - Stoccolma)",
+                ".BR (Belgio - Bruxelles)",
+                ".LS (Portogallo - Lisbona)",
+                ".VI (Austria - Vienna)",
+                ".TO (Canada - Toronto)",
+                ".AX (Australia - Sydney)",
+                ".HK (Hong Kong)"
+            ], key="val_suffix_choice")
+
+        # Costruzione ticker completo
+        suffix_code = ""
+        if "(" in suffix_choice and not suffix_choice.startswith("Nessuno"):
+            suffix_code = suffix_choice.split()[0].strip()
+
+        # Se l'utente ha già messo il suffisso manualmente, non duplicarlo
+        if raw_input:
+            if "." in raw_input:
+                final_test_ticker = raw_input
+            else:
+                final_test_ticker = raw_input + suffix_code
+        else:
+            final_test_ticker = ""
+
+        if final_test_ticker:
+            st.info(f"Ticker da verificare: **`{final_test_ticker}`**")
+
+        if st.button("🚀 Verifica Ticker su Yahoo Finance", key="btn_run_val", type="primary"):
+            if not final_test_ticker:
+                st.warning("Inserisci prima un simbolo da verificare.")
+            else:
+                with st.spinner(f"Interrogazione server Yahoo Finance per `{final_test_ticker}`..."):
+                    import yfinance as yf
+                    try:
+                        stock_obj = yf.Ticker(final_test_ticker)
+                        info_dict = stock_obj.info or {}
+                        hist_check = stock_obj.history(period="5d")
+                        
+                        has_data = not hist_check.empty and len(hist_check) > 0
+                        short_name = info_dict.get("shortName") or info_dict.get("longName") or TICKER_NAMES.get(final_test_ticker, "")
+                        
+                        if has_data or short_name:
+                            curr_p = hist_check['Close'].iloc[-1] if not hist_check.empty else info_dict.get('regularMarketPrice', 0.0)
+                            curr_currency = info_dict.get('currency', 'EUR/USD')
+                            sector_val = info_dict.get('sector', 'N/D')
+                            industry_val = info_dict.get('industry', 'N/D')
+                            exchange_val = info_dict.get('exchange', 'N/D')
+                            mkt_cap = info_dict.get('marketCap')
+                            mkt_cap_str = f"€{mkt_cap:,.0f}" if mkt_cap else "N/D"
+
+                            st.success(f"✅ **Titolo Trovato e Pienamente Compatibile!**")
+                            
+                            st.markdown(f"""
+                            <div style="background-color: #1a2230; padding: 20px; border-radius: 12px; border: 1px solid #2d3748; margin-bottom: 15px;">
+                                <h2 style="margin:0; color:#38bdf8;">{short_name} ({final_test_ticker})</h2>
+                                <p style="color:gray; margin-top:4px;">Borsa: <b>{exchange_val}</b> | Valuta: <b>{curr_currency}</b></p>
+                                <hr style="border-color: rgba(255,255,255,0.1); margin: 10px 0;">
+                                <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                                    <div><b>Ultimo Prezzo:</b> <span style="font-size:1.3rem; font-weight:bold; color:#4ade80;">{curr_currency} {curr_p:.2f}</span></div>
+                                    <div><b>Settore:</b> {sector_val}</div>
+                                    <div><b>Industria:</b> {industry_val}</div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # Salvataggio veloce in Watchlist
+                            st.markdown("#### ➕ Aggiungi direttamente alla tua Lista Titoli")
+                            with st.form("quick_add_wl_form"):
+                                q_label = st.text_input("Etichetta (opzionale):", value=f"{sector_val}", key="quick_add_label")
+                                q_note = st.text_area("Note iniziali:", value=f"Aggiunto dalla guida. Prezzo rif: {curr_p:.2f} {curr_currency}", key="quick_add_note")
+                                if st.form_submit_button("💾 Salva nella Lista Titoli", type="primary"):
+                                    add_watchlist_item(final_test_ticker, q_label, q_note)
+                                    st.success(f"✅ `{final_test_ticker}` inserito con successo nella tua Lista Titoli!")
+                        else:
+                            st.error(f"❌ **Titolo `{final_test_ticker}` non trovato su Yahoo Finance.**")
+                            st.markdown("""
+                            **Possibili cause:**
+                            1. **Suffisso mancante o errato:** Ad esempio, i titoli italiani necessitano di `.MI` (es. `ENEL.MI`), quelli francesi di `.PA` (es. `MC.PA`).
+                            2. **Mercato non coperto:** Alcuni mercati minori (come il *Nasdaq First North Baltic* di Tallinn/Riga/Vilnius) o mercati OTC non quotati non sono inclusi nel feed gratuito di Yahoo Finance.
+                            3. **Verifica su Yahoo:** Cerca l'azienda direttamente su [finance.yahoo.com](https://finance.yahoo.com) per scoprire il codice esatto.
+                            """)
+                    except Exception as err:
+                        st.error(f"Errore durante la verifica: {err}")
+
+    with tab_guide:
+        st.subheader("📖 Legenda Completa delle Borse Mondiali & Suffissi")
+        st.markdown("""
+        L'applicazione si collega all'infrastruttura di **Yahoo Finance**, il principale provider mondiale di dati finanziari.
+        Per i titoli **non quotati a Wall Street**, è necessario specificare il suffisso del rispettivo mercato.
+        """)
+
+        guide_data = [
+            {"Bandiera": "🇺🇸", "Paese / Mercato": "Stati Uniti (NYSE, NASDAQ, AMEX)", "Suffisso": "*Nessuno*", "Esempi Pratici": "AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL"},
+            {"Bandiera": "🇮🇹", "Paese / Mercato": "Italia (Borsa Italiana / Piazza Affari)", "Suffisso": "`.MI`", "Esempi Pratici": "ENEL.MI, ISP.MI, RACE.MI, LDO.MI, UCG.MI, ENI.MI"},
+            {"Bandiera": "🇩🇪", "Paese / Mercato": "Germania (XETRA / Francoforte)", "Suffisso": "`.DE`", "Esempi Pratici": "SAP.DE, BMW.DE, MBG.DE, SIE.DE, ALV.DE, AIR.DE"},
+            {"Bandiera": "🇫🇷", "Paese / Mercato": "Francia (Euronext Paris)", "Suffisso": "`.PA`", "Esempi Pratici": "MC.PA (LVMH), OR.PA (L'Oréal), TTE.PA (Total), SAN.PA"},
+            {"Bandiera": "🇳🇱", "Paese / Mercato": "Paesi Bassi (Euronext Amsterdam)", "Suffisso": "`.AS`", "Esempi Pratici": "ASML.AS, INGA.AS, PRX.AS, AD.AS, HEIA.AS"},
+            {"Bandiera": "🇪🇸", "Paese / Mercato": "Spagna (Bolsa de Madrid)", "Suffisso": "`.MC`", "Esempi Pratici": "SAN.MC (Santander), ITX.MC (Inditex), BBVA.MC, IBE.MC"},
+            {"Bandiera": "🇬🇧", "Paese / Mercato": "Regno Unito (London Stock Exchange)", "Suffisso": "`.L`", "Esempi Pratici": "SHEL.L (Shell), AZN.L (AstraZeneca), BP.L, HSBA.L"},
+            {"Bandiera": "🇨🇭", "Paese / Mercato": "Svizzera (SIX Swiss Exchange)", "Suffisso": "`.SW`", "Esempi Pratici": "NESN.SW (Nestlé), NOVN.SW (Novartis), ROG.SW (Roche)"},
+            {"Bandiera": "🇸🇪", "Paese / Mercato": "Svezia (Nasdaq Stockholm)", "Suffisso": "`.ST`", "Esempi Pratici": "VOLV-B.ST (Volvo), ERIC-B.ST (Ericsson), SPOT"},
+            {"Bandiera": "🇧🇪", "Paese / Mercato": "Belgio (Euronext Brussels)", "Suffisso": "`.BR`", "Esempi Pratici": "ABI.BR (Anheuser-Busch InBev), KBC.BR, UCB.BR"},
+            {"Bandiera": "🇵🇹", "Paese / Mercato": "Portogallo (Euronext Lisbon)", "Suffisso": "`.LS`", "Esempi Pratici": "EDP.LS, GALP.LS, JMT.LS"},
+            {"Bandiera": "🇦🇹", "Paese / Mercato": "Austria (Wiener Börse)", "Suffisso": "`.VI`", "Esempi Pratici": "EBS.VI (Erste Group), OMV.VI, VOE.VI"},
+            {"Bandiera": "🇨🇦", "Paese / Mercato": "Canada (Toronto Stock Exchange)", "Suffisso": "`.TO`", "Esempi Pratici": "SHOP.TO (Shopify), RY.TO, TD.TO, CNR.TO"},
+            {"Bandiera": "🇦🇺", "Paese / Mercato": "Australia (ASX Sydney)", "Suffisso": "`.AX`", "Esempi Pratici": "BHP.AX, CBA.AX, CSL.AX, NAB.AX"},
+            {"Bandiera": "🇭🇰", "Paese / Mercato": "Hong Kong (HKEX)", "Suffisso": "`.HK`", "Esempi Pratici": "0700.HK (Tencent), 9988.HK (Alibaba HK), 0941.HK"}
+        ]
+
+        df_guide = pd.DataFrame(guide_data)
+        st.dataframe(df_guide, width="stretch", hide_index=True)
+
+        st.markdown("---")
+        st.markdown("### ❓ Domande Frequenti sui Titoli")
+        with st.expander("📌 Perché aziende come Saunum Group (SAUNA) o altre micro-cap non funzionano?"):
+            st.markdown("""
+            Aziende come **Saunum Group AS** sono quotate su listini multilaterali regionali (nel caso specifico il **Nasdaq First North Baltic** di Tallinn, Estonia).
+            Yahoo Finance copre quasi tutte le borse regolamentate europee e globali (Milano, Parigi, Francoforte, Londra, Madrid, Amsterdam, Zurigo, Stoccolma, ecc.), ma **non indicizza i mercati minori baltici (Tallinn, Riga, Vilnius)**.
+            Se un titolo non è presente su Yahoo Finance, l'app non può estrarne lo storico dei prezzi o i bilanci per gli agenti.
+            """)
+
+        with st.expander("📌 Come faccio a trovare il ticker esatto di un'azienda sconosciuta?"):
+            st.markdown("""
+            1. Vai su **[finance.yahoo.com](https://finance.yahoo.com)**.
+            2. Digita il nome dell'azienda nella barra di ricerca in alto (es. *Ferrari*, *L'Oreal*, *LVMH*, *ASML*).
+            3. Nel menu a tendina vedrai il codice con il suffisso (es. `RACE.MI`, `OR.PA`, `MC.PA`).
+            4. Copia quel codice e usalo nella tua app per l'analisi!
+            """)
+
