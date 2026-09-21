@@ -620,6 +620,20 @@ elif page == "🔎 Screener IA":
                         r_res['agent_name'] = r_agent.name
                         
                         fusion_res = fusion.process_signals([p_res, n_res, sec_res, sm_res, r_res])
+                        risk_level_str = r_res.get('metadata', {}).get('risk_level', 'MEDIO')
+                        
+                        # Salvataggio nel Database per AI Autotrading
+                        try:
+                            save_signal(
+                                ticker=ticker,
+                                prediction=fusion_res['prediction'],
+                                final_signal=fusion_res['final_signal'],
+                                confidence=fusion_res['confidence'],
+                                risk_level=risk_level_str,
+                                raw_data=fusion_res
+                            )
+                        except Exception as ex:
+                            logger.error(f"Errore nel salvataggio segnale per {ticker}: {ex}")
                         
                         if fusion_res['final_signal'] >= min_signal:
                             results.append({
@@ -628,14 +642,14 @@ elif page == "🔎 Screener IA":
                                 'Segnale AI': round(fusion_res['final_signal'], 2),
                                 'Previsione': fusion_res['prediction'],
                                 'Confidenza': f"{fusion_res['confidence']:.0%}",
-                                'Rischio': r_res.get('metadata', {}).get('risk_level', 'MEDIO')
+                                'Rischio': risk_level_str
                             })
                 except Exception as e:
                     logger.error(f"Error in screener for {ticker}: {e}")
                 
             st.session_state['screener_results'] = results
             st.session_state['screener_market'] = sel_market_scr
-            st.success(f"✅ Screener completato: trovati {len(results)} titoli con segnale >= {min_signal:+.2f}!")
+            st.success(f"✅ Screener completato: {len(candidates)} titoli analizzati e salvati nel database. {len(results)} titoli con segnale >= {min_signal:+.2f}!")
         
         if results:
             render_screener_top_5(results, sel_market_scr)
@@ -1006,30 +1020,81 @@ elif page == "🤖 AI Autotrading":
                 st.success("Budget aggiornato con successo!")
                 st.rerun()
 
-    if st.button("🚀 Avvia Ciclo Autonomo di Trading (Esegui 1 Step)"):
-        with st.spinner("L'agente sta analizzando i mercati ed i titoli in portafoglio..."):
+    # --- SORGENTE SEGNALI E AVVIO CICLO ---
+    st.markdown("### 🎯 Esecuzione Ciclo di Trading IA")
+    db_signals = get_latest_signals()
+    
+    col_mode, col_exec = st.columns([2, 1])
+    with col_mode:
+        trading_source = st.radio(
+            "Seleziona su quali titoli operare:",
+            [
+                f"📥 Segnali memorizzati nel Database dallo Screener ({len(db_signals)} titoli disponibili)",
+                "📋 Titoli presenti nella tua Lista Titoli (Watchlist)",
+                "🇮🇹 Scansione Rapida Mercato Milano",
+                "🇺🇸 Scansione Rapida Mercato New York",
+                "🇫🇷 Scansione Rapida Mercato Parigi",
+                "🇩🇪 Scansione Rapida Mercato Francoforte"
+            ],
+            key="trading_source_choice"
+        )
+    with col_exec:
+        st.write("")
+        st.write("")
+        btn_start_trade = st.button("🚀 Esegui Ciclo di Trading", type="primary", use_container_width=True)
+
+    if btn_start_trade:
+        with st.spinner("L'agente IA sta elaborando i segnali, valutando il rischio e gestendo il portafoglio..."):
             import importlib
             import agents.autotrading_agent
             importlib.reload(agents.autotrading_agent)
             from agents.autotrading_agent import AutotradingAgent
             
             auto_agent = AutotradingAgent()
-            if hasattr(auto_agent, 'run_step'):
-                actions = auto_agent.run_step(market_lists['Milano'][:10])
-            else:
-                res = auto_agent.run_cycle()
-                actions = res.get('actions', [])
+            
+            if "Segnali memorizzati" in trading_source:
+                if not db_signals:
+                    st.warning("⚠️ Nessun segnale presente nel database. Vai prima su '🔎 Screener IA' ed esegui uno screening, oppure seleziona un'altra modalità qui sopra.")
+                    cycle_res = None
+                else:
+                    cycle_res = auto_agent.run_cycle(db_signals)
+            elif "Lista Titoli" in trading_source:
+                wl_items = get_watchlist()
+                wl_tickers = [w['ticker'] for w in wl_items]
+                if not wl_tickers:
+                    st.warning("⚠️ La tua Lista Titoli è vuota. Aggiungi prima dei titoli nella pagina '📋 Lista Titoli'.")
+                    cycle_res = None
+                else:
+                    cycle_res = auto_agent.run_step(wl_tickers)
+            elif "Milano" in trading_source:
+                cycle_res = auto_agent.run_step(market_lists['Milano'][:15])
+            elif "New York" in trading_source:
+                cycle_res = auto_agent.run_step(market_lists['New York'][:15])
+            elif "Parigi" in trading_source:
+                cycle_res = auto_agent.run_step(market_lists['Parigi'][:15])
+            else: # Francoforte
+                cycle_res = auto_agent.run_step(market_lists['Francoforte'][:15])
                 
-            st.session_state['last_auto_actions'] = actions
-            st.rerun()
+            if cycle_res:
+                st.session_state['last_auto_res'] = cycle_res
+                st.rerun()
 
-    if 'last_auto_actions' in st.session_state:
-        actions = st.session_state['last_auto_actions']
-        if actions:
-            for act in actions:
-                st.success(f"Azione Agente: {act}")
+    if 'last_auto_res' in st.session_state and st.session_state['last_auto_res']:
+        last_res = st.session_state['last_auto_res']
+        acts = last_res.get('actions', [])
+        d_logs = last_res.get('decision_logs', [])
+        
+        st.markdown("#### 📢 Esito Ultimo Ciclo Eseguito")
+        if acts:
+            for act in acts:
+                st.success(act)
         else:
-            st.info("Ciclo completato. Nessuna operazione eseguita nel ciclo corrente (criteri minimi non soddisfatti o liquidità allocata).")
+            st.info(f"ℹ️ {last_res.get('message', 'Nessun ordine inviato a mercato nel ciclo corrente.')}")
+            
+        if d_logs:
+            with st.expander("🔍 Dettaglio Motivazioni & Log Decisionale Agente", expanded=False):
+                for l in d_logs:
+                    st.markdown(f"- {l}")
 
     col_ap, col_at = st.columns(2)
     with col_ap:
