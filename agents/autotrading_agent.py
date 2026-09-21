@@ -5,14 +5,17 @@ except ImportError:
     logger = logging.getLogger("autotrading_agent")
     logging.basicConfig(level=logging.INFO)
 import math
+import pandas as pd
 
 from data.db import (
     get_agent_account, 
     get_agent_portfolio, 
     execute_agent_trade, 
-    get_latest_signals
+    get_latest_signals,
+    get_agent_trades
 )
 from data.market_data import MarketDataClient
+
 
 from agents.exit_agents import (
     ExitTechnicalAgent, ExitSentimentAgent, ExitFundamentalAgent,
