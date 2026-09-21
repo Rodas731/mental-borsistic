@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from data.market_data import MarketDataClient
+from data.market_data import MarketDataClient, search_by_isin_or_keyword
 from agents.price_agent import PriceAgent
 from agents.news_agent import NewsAgent
 from agents.sec_agent import SECAgent
@@ -463,11 +463,11 @@ if page == "📡 Live Analysis":
 
     with tab_search:
         st.header("🔍 Ricerca e Analisi Singolo Titolo")
-        search_mode = st.radio("Metodo di inserimento:", ["Selezione da Lista (Mercati)", "Inserimento Libero"], horizontal=True, key="search_mode_radio")
+        search_mode = st.radio("Metodo di inserimento:", ["Selezione da Lista (Mercati)", "Inserimento Libero (Ticker)", "🆔 Ricerca per Codice ISIN"], horizontal=True, key="search_mode_radio")
         
-        col_search, col_btn, col_clear = st.columns([2, 1, 1])
         ad_hoc_ticker = ""
         if search_mode == "Selezione da Lista (Mercati)":
+            col_search, col_btn, col_clear = st.columns([2, 1, 1])
             with col_search:
                 col_mkt, col_tkr = st.columns(2)
                 with col_mkt:
@@ -479,19 +479,53 @@ if page == "📡 Live Analysis":
                         format_func=lambda x: f"{x} - {TICKER_NAMES.get(x, 'Nome Sconosciuto')}",
                         key="search_sel_ticker"
                     )
-        else:
+            with col_btn:
+                st.write("")
+                st.write("")
+                search_btn = st.button("Analizza Singolo Titolo", key="btn_single_search")
+            with col_clear:
+                st.write("")
+                st.write("")
+                clear_btn = st.button("Chiudi Ricerca", key="btn_single_clear")
+        elif search_mode == "Inserimento Libero (Ticker)":
+            col_search, col_btn, col_clear = st.columns([2, 1, 1])
             with col_search:
                 ad_hoc_ticker = st.text_input("Inserisci un Ticker (es. AAPL, ENEL.MI, TSLA):", key="search_text_input").upper().strip()
-                
-        with col_btn:
-            st.write("")
-            st.write("")
-            search_btn = st.button("Analizza Singolo Titolo", key="btn_single_search")
+            with col_btn:
+                st.write("")
+                st.write("")
+                search_btn = st.button("Analizza Singolo Titolo", key="btn_single_search")
+            with col_clear:
+                st.write("")
+                st.write("")
+                clear_btn = st.button("Chiudi Ricerca", key="btn_single_clear")
+        else: # Ricerca per Codice ISIN
+            col_isin_in, col_isin_btn = st.columns([2, 1])
+            with col_isin_in:
+                isin_query = st.text_input("Inserisci Codice ISIN (es. IT0003128367, US0378331005, FR0000121014):", key="search_isin_input").strip().upper()
+            with col_isin_btn:
+                st.write("")
+                st.write("")
+                isin_search_btn = st.button("🔍 Trova da ISIN", key="btn_isin_lookup", type="primary")
             
-        with col_clear:
-            st.write("")
-            st.write("")
-            clear_btn = st.button("Chiudi Ricerca", key="btn_single_clear")
+            clear_btn = st.button("Chiudi Ricerca", key="btn_single_clear_isin")
+            search_btn = False
+
+            if isin_query and (isin_search_btn or st.session_state.get('last_isin_searched') == isin_query):
+                st.session_state['last_isin_searched'] = isin_query
+                with st.spinner(f"Ricerca del titolo per ISIN '{isin_query}'..."):
+                    isin_matches = search_by_isin_or_keyword(isin_query)
+                
+                if isin_matches:
+                    st.success(f"Trovati {len(isin_matches)} risultati compatibili per l'ISIN `{isin_query}`:")
+                    match_options = [f"{m['ticker']} - {m['name']} ({m.get('exchange', 'Borsa')})" for m in isin_matches]
+                    selected_match_idx = st.selectbox("Seleziona la quotazione da analizzare:", range(len(match_options)), format_func=lambda i: match_options[i], key="sel_isin_match_idx")
+                    ad_hoc_ticker = isin_matches[selected_match_idx]['ticker']
+                    if st.button(f"🚀 Analizza {ad_hoc_ticker}", type="primary", key="btn_run_isin_analysis"):
+                        st.session_state['ad_hoc_search'] = ad_hoc_ticker
+                        st.rerun()
+                else:
+                    st.error(f"Nessun titolo trovato su Yahoo Finance per l'ISIN `{isin_query}`. Verifica il codice o prova con il simbolo Ticker.")
 
         if clear_btn:
             st.session_state['ad_hoc_search'] = None
@@ -1029,7 +1063,75 @@ elif page == "🌐 Guida & Trova Ticker":
     st.title("🌐 Guida alle Borse & Ricerca Ticker")
     st.markdown("Questa sezione ti aiuta a trovare la corretta formattazione dei ticker per qualsiasi borsa mondiale e a verificare in tempo reale se un titolo è supportato dall'app.")
 
-    tab_verifier, tab_guide = st.tabs(["🔍 Verificatore Ticker Live", "📖 Legenda Borse & Suffissi"])
+    tab_isin, tab_verifier, tab_guide = st.tabs(["🆔 Ricerca per Codice ISIN", "🔍 Verificatore Ticker Live", "📖 Legenda Borse & Suffissi"])
+
+    with tab_isin:
+        st.subheader("🆔 Ricerca e Conversione da Codice ISIN a Ticker")
+        st.markdown("Inserisci il codice **ISIN** internazionale (12 caratteri alfanumerici) per individuare automaticamente il Ticker corrispondente su Yahoo Finance, vederne i dettagli e aggiungerlo alla tua Lista o analizzarlo.")
+
+        is_col1, is_col2 = st.columns([2, 1])
+        with is_col1:
+            input_isin = st.text_input("Codice ISIN (es. IT0003128367, US0378331005, FR0000121014, NL0010273215):", key="isin_tab_input").strip().upper()
+        with is_col2:
+            st.write("")
+            st.write("")
+            btn_search_isin = st.button("🔎 Risolvi ISIN", key="btn_isin_tab_submit", type="primary")
+
+        if input_isin and (btn_search_isin or st.session_state.get('searched_isin_tab') == input_isin):
+            st.session_state['searched_isin_tab'] = input_isin
+            with st.spinner(f"Interrogazione server per ISIN `{input_isin}`..."):
+                found_quotes = search_by_isin_or_keyword(input_isin)
+
+            if found_quotes:
+                st.success(f"✅ Trovata/e **{len(found_quotes)}** quotazione/i per l'ISIN `{input_isin}`:")
+                for q in found_quotes:
+                    tkr = q['ticker']
+                    q_name = q.get('name', tkr)
+                    q_exch = q.get('exchange', 'Borsa')
+                    q_type = q.get('quoteType', 'Azione')
+
+                    with st.expander(f"📍 **{tkr}** — {q_name} (Borsa: {q_exch} | {q_type})", expanded=True):
+                        # Recupero info live veloci
+                        try:
+                            import yfinance as yf
+                            stk = yf.Ticker(tkr)
+                            stk_inf = stk.info or {}
+                            stk_hist = stk.history(period="5d")
+                            price_val = stk_hist['Close'].iloc[-1] if not stk_hist.empty else stk_inf.get('regularMarketPrice', 0.0)
+                            curr_val = stk_inf.get('currency', 'EUR/USD')
+                            sect_val = stk_inf.get('sector', 'N/D')
+                            
+                            st.markdown(f"""
+                            * **Nome Ufficiale:** {q_name}
+                            * **Ticker Yahoo Finance:** `{tkr}`
+                            * **Borsa di Negoziazione:** {q_exch}
+                            * **Settore:** {sect_val}
+                            * **Ultimo Prezzo:** **{curr_val} {price_val:.2f}**
+                            """)
+                        except Exception:
+                            st.markdown(f"* **Ticker:** `{tkr}` | **Borsa:** {q_exch}")
+
+                        act_col1, act_col2 = st.columns(2)
+                        with act_col1:
+                            # Form salvataggio in Lista Titoli
+                            with st.form(f"isin_save_form_{tkr}"):
+                                lbl_in = st.text_input("Etichetta:", value=f"ISIN: {input_isin}", key=f"lbl_isin_{tkr}")
+                                not_in = st.text_area("Note:", value=f"Aggiunto tramite ricerca ISIN {input_isin}", key=f"not_isin_{tkr}", height=80)
+                                if st.form_submit_button("💾 Salva nella Lista Titoli", type="primary"):
+                                    add_watchlist_item(tkr, lbl_in, not_in)
+                                    st.success(f"✅ `{tkr}` aggiunto alla tua Lista Titoli!")
+                        with act_col2:
+                            st.info("Vuoi analizzare questo titolo con l'Intelligenza Artificiale?")
+                            if st.button(f"🚀 Avvia Analisi Live per {tkr}", key=f"btn_isin_go_live_{tkr}"):
+                                st.session_state['ad_hoc_search'] = tkr
+                                st.info(f"Vai alla scheda **📡 Live Analysis** per visualizzare i grafici e il report IA di {tkr}!")
+            else:
+                st.error(f"❌ Nessun titolo trovato per l'ISIN `{input_isin}` su Yahoo Finance.")
+                st.markdown("""
+                **Suggerimenti:**
+                * Verifica che il codice ISIN sia corretto e composto da 12 caratteri (es. `IT0003128367`).
+                * Alcune emissioni illiquide o mercati minori non sono indicizzati per ISIN su Yahoo Finance: in tal caso, cerca direttamente per nome o ticker nella scheda *Verificatore Ticker Live*.
+                """)
 
     with tab_verifier:
         st.subheader("🔍 Verifica Compatibilità Ticker in Tempo Reale")

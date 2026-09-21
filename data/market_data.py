@@ -1,7 +1,52 @@
 import yfinance as yf
 import pandas as pd
+import requests
 from loguru import logger
 import streamlit as st
+
+@st.cache_data(ttl=360, show_spinner=False)
+def search_by_isin_or_keyword(query: str) -> list:
+    """
+    Searches Yahoo Finance by ISIN code or company name/keyword.
+    Returns a list of dicts with matching tickers, names, exchange, etc.
+    """
+    query = query.strip()
+    if not query:
+        return []
+    
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    params = {
+        "q": query,
+        "quotesCount": 8,
+        "newsCount": 0,
+        "enableFuzzyQuery": False,
+        "quotesQueryId": "tss_match_phrase_query"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            quotes = data.get("quotes", [])
+            results = []
+            for q in quotes:
+                symbol = q.get("symbol")
+                if symbol:
+                    results.append({
+                        "ticker": symbol,
+                        "name": q.get("shortname") or q.get("longname") or symbol,
+                        "exchange": q.get("exchange", "N/D"),
+                        "quoteType": q.get("quoteType", "EQUITY"),
+                        "industry": q.get("industry", ""),
+                        "score": q.get("score", 0)
+                    })
+            return results
+    except Exception as e:
+        logger.error(f"Error searching ticker for query '{query}': {e}")
+    return []
 
 @st.cache_data(ttl=360, show_spinner=False)
 def _fetch_historical_prices_cached(ticker: str, period: str = "1mo", interval: str = "1d") -> pd.DataFrame:
@@ -120,3 +165,4 @@ class MarketDataClient:
         Fetches general company info (sector, industry, market cap) (cached for 6 min).
         """
         return _fetch_company_info_cached(ticker)
+
