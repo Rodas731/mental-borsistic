@@ -3,7 +3,12 @@ import json
 import os
 import hashlib
 from datetime import datetime
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("db")
+    logging.basicConfig(level=logging.INFO)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "market_data.db")
 

@@ -1,5 +1,11 @@
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("autotrading_agent")
+    logging.basicConfig(level=logging.INFO)
 import math
+
 from data.db import (
     get_agent_account, 
     get_agent_portfolio, 

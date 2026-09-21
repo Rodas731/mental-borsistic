@@ -2,7 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("app")
+    logging.basicConfig(level=logging.INFO)
 from data.market_data import MarketDataClient, search_by_isin_or_keyword
 from agents.price_agent import PriceAgent
 from agents.news_agent import NewsAgent

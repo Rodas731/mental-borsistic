@@ -1,7 +1,12 @@
 import yfinance as yf
 import pandas as pd
 import requests
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("market_data")
+    logging.basicConfig(level=logging.INFO)
 import streamlit as st
 
 @st.cache_data(ttl=360, show_spinner=False)
